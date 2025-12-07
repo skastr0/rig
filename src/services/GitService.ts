@@ -36,10 +36,13 @@ const fullClone = (
   targetPath: string
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function* () {
-    const branchArg = install.branch ? `-b ${install.branch}` : ""
-    const cmd = `git clone ${branchArg} ${install.repo} ${targetPath}`.trim().replace(/\s+/g, " ")
+    const args = ["clone"]
+    if (install.branch) {
+      args.push("-b", install.branch)
+    }
+    args.push(install.repo, targetPath)
 
-    yield* shell.run(cmd).pipe(
+    yield* shell.exec("git", args).pipe(
       Effect.mapError(
         () =>
           new GitError({
@@ -56,13 +59,13 @@ const sparseClone = (
   targetPath: string
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function* () {
-    const branchArg = install.branch ? `-b ${install.branch}` : ""
+    const initArgs = ["clone", "--filter=blob:none", "--no-checkout"]
+    if (install.branch) {
+      initArgs.push("-b", install.branch)
+    }
+    initArgs.push(install.repo, targetPath)
 
-    const initCmd = `git clone --filter=blob:none --no-checkout ${branchArg} ${install.repo} ${targetPath}`
-      .trim()
-      .replace(/\s+/g, " ")
-
-    yield* shell.run(initCmd).pipe(
+    yield* shell.exec("git", initArgs).pipe(
       Effect.mapError(
         () =>
           new GitError({
@@ -72,7 +75,7 @@ const sparseClone = (
       )
     )
 
-    yield* shell.run(`cd ${targetPath} && git sparse-checkout init --cone`).pipe(
+    yield* shell.exec("git", ["sparse-checkout", "init", "--cone"], { cwd: targetPath }).pipe(
       Effect.mapError(
         () =>
           new GitError({
@@ -82,18 +85,17 @@ const sparseClone = (
       )
     )
 
-    const patterns = install.sparse!.join(" ")
-    yield* shell.run(`cd ${targetPath} && git sparse-checkout set ${patterns}`).pipe(
+    yield* shell.exec("git", ["sparse-checkout", "set", ...install.sparse!], { cwd: targetPath }).pipe(
       Effect.mapError(
         () =>
           new GitError({
             repo: install.repo,
-            reason: `Failed to set sparse patterns: ${patterns}`,
+            reason: `Failed to set sparse patterns: ${install.sparse!.join(" ")}`,
           })
       )
     )
 
-    yield* shell.run(`cd ${targetPath} && git checkout`).pipe(
+    yield* shell.exec("git", ["checkout"], { cwd: targetPath }).pipe(
       Effect.mapError(
         () =>
           new GitError({

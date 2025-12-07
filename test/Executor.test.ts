@@ -52,6 +52,9 @@ const mockShellService = (
 
       return { stdout: "", stderr: "", exitCode: 0 }
     }) as Effect.Effect<ShellResult, { _tag: "ShellError"; command: string; exitCode: number; stderr: string }>,
+
+  exec: (command, args) =>
+    Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }) as Effect.Effect<ShellResult, { _tag: "ShellError"; command: string; exitCode: number; stderr: string }>,
 })
 
 const mockBackupService: BackupService = {

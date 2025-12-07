@@ -23,3 +23,8 @@ export class ValidationError extends Data.TaggedError("ValidationError")<{
 export class CycleError extends Data.TaggedError("CycleError")<{
   readonly cycle: readonly string[]
 }> {}
+
+export class BackupError extends Data.TaggedError("BackupError")<{
+  readonly path: string
+  readonly reason: string
+}> {}
