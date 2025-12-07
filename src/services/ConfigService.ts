@@ -36,14 +36,10 @@ export const ConfigServiceLive = Layer.succeed(
           )
         )
 
-        let parsed: unknown
-        try {
-          parsed = JSON.parse(content)
-        } catch {
-          return yield* Effect.fail(
-            new ConfigError({ message: "Invalid JSON", path: configPath })
-          )
-        }
+        const parsed = yield* Effect.try({
+          try: () => JSON.parse(content) as unknown,
+          catch: () => new ConfigError({ message: "Invalid JSON", path: configPath })
+        })
 
         const decodeResult = yield* Schema.decodeUnknown(SystemConfig)(parsed).pipe(
           Effect.mapError(
