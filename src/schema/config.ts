@@ -23,6 +23,7 @@ export const SystemItem = Schema.Struct({
   group: Schema.optional(Schema.String),
   dependsOn: Schema.optional(Schema.Array(Schema.String)),
   backup: Schema.optional(Schema.String),
+  tags: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export type SystemItem = Schema.Schema.Type<typeof SystemItem>
