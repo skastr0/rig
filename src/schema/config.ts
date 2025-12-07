@@ -1,16 +1,25 @@
 import { Schema } from "effect"
 
+// Git URL pattern: supports https://, git@, git://, ssh:// formats
+const gitUrlPattern = /^(https?:\/\/|git@|git:\/\/|ssh:\/\/).+/
+
 export const GitInstall = Schema.Struct({
   source: Schema.Literal("git"),
-  repo: Schema.String,
-  path: Schema.String,
+  repo: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.pattern(gitUrlPattern)
+  ),
+  path: Schema.String.pipe(Schema.minLength(1)),
   branch: Schema.optional(Schema.String),
   sparse: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export type GitInstall = Schema.Schema.Type<typeof GitInstall>
 
-export const InstallStrategy = Schema.Union(Schema.String, GitInstall)
+export const InstallStrategy = Schema.Union(
+  Schema.String.pipe(Schema.minLength(1)),
+  GitInstall
+)
 
 export type InstallStrategy = Schema.Schema.Type<typeof InstallStrategy>
 

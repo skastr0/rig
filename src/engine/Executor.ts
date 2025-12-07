@@ -6,6 +6,7 @@ import { ShellService } from "../services/ShellService.js"
 import { BackupService } from "../services/BackupService.js"
 import { GitService } from "../services/GitService.js"
 import { ShellError, GitError, BackupError } from "../errors.js"
+import { expandPath } from "../utils.js"
 
 export type ItemStatus = "installed" | "missing" | "error"
 
@@ -47,7 +48,7 @@ const checkItem = (
   if (checkMode === "path-exists") {
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const expandedPath = item.check.replace(/^~/, process.env["HOME"] ?? "")
+      const expandedPath = expandPath(item.check)
       return yield* fs.exists(expandedPath).pipe(Effect.catchAll(() => Effect.succeed(false)))
     })
   }

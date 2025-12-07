@@ -1,17 +1,14 @@
 import { Context, Effect, Layer } from "effect"
-import * as Os from "node:os"
 import { GitError } from "../errors.js"
 import { ShellService } from "./ShellService.js"
 import type { GitInstall } from "../schema/config.js"
+import { expandPath } from "../utils.js"
 
 export interface GitService {
   readonly clone: (install: GitInstall) => Effect.Effect<void, GitError, ShellService>
 }
 
 export const GitService = Context.GenericTag<GitService>("GitService")
-
-const expandPath = (path: string): string =>
-  path.startsWith("~/") ? path.replace("~", Os.homedir()) : path
 
 export const GitServiceLive = Layer.succeed(
   GitService,

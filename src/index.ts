@@ -1,12 +1,10 @@
-import { Effect, Layer } from "effect"
-import { BunContext, BunRuntime } from "@effect/platform-bun"
+import { Effect } from "effect"
+import { BunRuntime } from "@effect/platform-bun"
 import { runCli, type CliOptions } from "./cli.js"
-import { ConfigService, ConfigServiceLive } from "./services/ConfigService.js"
-import { ShellServiceLive } from "./services/ShellService.js"
-import { BackupServiceLive } from "./services/BackupService.js"
-import { GitServiceLive } from "./services/GitService.js"
+import { ConfigService } from "./services/ConfigService.js"
+import { AppLayer } from "./services/AppLayer.js"
 import { topologicalSort } from "./engine/Planner.js"
-import { Executor, ExecutorLive } from "./engine/Executor.js"
+import { Executor } from "./engine/Executor.js"
 import { createReporter } from "./engine/Reporter.js"
 import type { SystemItem } from "./schema/config.js"
 import {
@@ -15,6 +13,7 @@ import {
   CycleError,
   ShellError,
   GitError,
+  BackupError,
 } from "./errors.js"
 
 const filterItems = (
@@ -54,6 +53,9 @@ const formatError = (error: unknown): string => {
   if (error instanceof GitError) {
     return `Git error for ${error.repo}: ${error.reason}`
   }
+  if (error instanceof BackupError) {
+    return `Backup error for ${error.path}: ${error.reason}`
+  }
   return String(error)
 }
 
@@ -83,22 +85,12 @@ const handler = (options: CliOptions) =>
     reporter.printSummary(results)
   }).pipe(
     Effect.catchAll((error) =>
-      Effect.gen(function* () {
+      Effect.sync(() => {
         console.error(`\n${formatError(error)}\n`)
-        yield* Effect.fail(error)
+        process.exit(1)
       })
     )
   )
-
-const ServicesLayer = Layer.mergeAll(
-  ShellServiceLive,
-  BackupServiceLive,
-  GitServiceLive,
-  ConfigServiceLive,
-  ExecutorLive
-)
-
-const AppLayer = ServicesLayer.pipe(Layer.provideMerge(BunContext.layer))
 
 const program = runCli(handler)(process.argv).pipe(Effect.provide(AppLayer))
 
