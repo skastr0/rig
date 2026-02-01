@@ -1,49 +1,45 @@
-import { Command, Options } from "@effect/cli"
-import { Effect, Option } from "effect"
+import { Command, Options } from "@effect/cli";
+import { Effect, Option } from "effect";
 
 export interface CliOptions {
-  readonly config: string
-  readonly profile: string | undefined
-  readonly dryRun: boolean
-  readonly tags: readonly string[]
-  readonly only: readonly string[]
-  readonly verbose: boolean
+  readonly config: string;
+  readonly profile: string | undefined;
+  readonly dryRun: boolean;
+  readonly tags: readonly string[];
+  readonly only: readonly string[];
+  readonly verbose: boolean;
 }
 
 const config = Options.withDefault(
   Options.file("config").pipe(Options.withAlias("c")),
-  "./system-config.json"
-).pipe(Options.withDescription("Path to configuration file"))
+  "./system-config.json",
+).pipe(Options.withDescription("Path to JSON config file (default: ./system-config.json)"));
 
-const profile = Options.optional(
-  Options.text("profile").pipe(Options.withAlias("p"))
-).pipe(Options.withDescription("Profile to apply"))
+const profile = Options.optional(Options.text("profile").pipe(Options.withAlias("p"))).pipe(
+  Options.withDescription("Profile to apply (e.g., 'work', 'personal')"),
+);
 
 const dryRun = Options.boolean("dry-run").pipe(
   Options.withAlias("d"),
-  Options.withDescription("Show what would be installed without making changes")
-)
+  Options.withDescription("Preview changes without installing anything"),
+);
 
 const tags = Options.withDefault(
-  Options.text("tags").pipe(
-    Options.withAlias("t"),
-    Options.repeated
-  ),
-  []
-).pipe(Options.withDescription("Filter items by tags"))
+  Options.text("tags").pipe(Options.withAlias("t"), Options.repeated),
+  [],
+).pipe(Options.withDescription("Filter items by tags (can be repeated: -t dev -t editor)"));
 
 const only = Options.withDefault(
-  Options.text("only").pipe(
-    Options.withAlias("o"),
-    Options.repeated
-  ),
-  []
-).pipe(Options.withDescription("Install only specific items by name"))
+  Options.text("only").pipe(Options.withAlias("o"), Options.repeated),
+  [],
+).pipe(
+  Options.withDescription("Install specific items only (can be repeated: -o neovim -o ripgrep)"),
+);
 
 const verbose = Options.boolean("verbose").pipe(
   Options.withAlias("v"),
-  Options.withDescription("Show detailed output")
-)
+  Options.withDescription("Show detailed output including command execution"),
+);
 
 const cliOptions = {
   config,
@@ -52,29 +48,37 @@ const cliOptions = {
   tags,
   only,
   verbose,
-}
+};
 
-export const makeCommand = <E, R>(
-  handler: (options: CliOptions) => Effect.Effect<void, E, R>
-) =>
-  Command.make(
-    "system-setup",
-    cliOptions,
-    (opts) =>
-      handler({
-        config: opts.config,
-        profile: Option.getOrUndefined(opts.profile),
-        dryRun: opts.dryRun,
-        tags: opts.tags,
-        only: opts.only,
-        verbose: opts.verbose,
-      })
-  ).pipe(Command.withDescription("Declarative system configuration tool"))
+export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
+  Command.make("system-setup", cliOptions, (opts) =>
+    handler({
+      config: opts.config,
+      profile: Option.getOrUndefined(opts.profile),
+      dryRun: opts.dryRun,
+      tags: opts.tags,
+      only: opts.only,
+      verbose: opts.verbose,
+    }),
+  ).pipe(
+    Command.withDescription(
+      `Declarative system configuration tool
 
-export const runCli = <E, R>(
-  handler: (options: CliOptions) => Effect.Effect<void, E, R>
-) =>
+Reads a JSON config file and installs only what's missing. Items are checked
+for existence before installing. Use --dry-run to preview changes.
+
+Quick Start:
+  system-setup --dry-run          # Preview what would be installed
+  system-setup                    # Apply configuration
+  system-setup -p work            # Apply with 'work' profile
+  system-setup -t dev -t editor   # Install items with dev OR editor tags
+
+Docs: See USAGE.md for examples and patterns`,
+    ),
+  );
+
+export const runCli = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
   Command.run(makeCommand(handler), {
     name: "system-setup",
     version: "0.1.0",
-  })
+  });

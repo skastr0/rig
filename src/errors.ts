@@ -1,30 +1,30 @@
-import { Data } from "effect"
+import { Data } from "effect";
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{
-  readonly message: string
-  readonly path?: string
+  readonly message: string;
+  readonly path?: string;
 }> {}
 
 export class ShellError extends Data.TaggedError("ShellError")<{
-  readonly command: string
-  readonly exitCode: number
-  readonly stderr: string
+  readonly command: string;
+  readonly exitCode: number;
+  readonly stderr: string;
 }> {}
 
 export class GitError extends Data.TaggedError("GitError")<{
-  readonly repo: string
-  readonly reason: string
+  readonly repo: string;
+  readonly reason: string;
 }> {}
 
 export class ValidationError extends Data.TaggedError("ValidationError")<{
-  readonly issues: readonly string[]
+  readonly issues: readonly string[];
 }> {}
 
 export class CycleError extends Data.TaggedError("CycleError")<{
-  readonly cycle: readonly string[]
+  readonly cycle: readonly string[];
 }> {}
 
 export class BackupError extends Data.TaggedError("BackupError")<{
-  readonly path: string
-  readonly reason: string
+  readonly path: string;
+  readonly reason: string;
 }> {}

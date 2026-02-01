@@ -1,4 +1,4 @@
-import * as Os from "node:os"
+import * as Os from "node:os";
 
 /**
  * Expands path shortcuts like ~ (tilde) to the user's home directory.
@@ -13,6 +13,6 @@ import * as Os from "node:os"
  * expandPath("/absolute/path") // "/absolute/path"
  */
 export const expandPath = (path: string): string => {
-  const homeDir = Os.homedir()
-  return path.replace(/^~/, homeDir).replace(/^\$HOME/, homeDir)
-}
+  const homeDir = Os.homedir();
+  return path.replace(/^~/, homeDir).replace(/^\$HOME/, homeDir);
+};
