@@ -13,13 +13,14 @@ export type ItemStatus = "installed" | "missing" | "error";
 export interface ExecutionResult {
   readonly name: string;
   readonly status: ItemStatus;
-  readonly action: "skipped" | "installed" | "failed";
+  readonly action: "skipped" | "installed" | "updated" | "failed";
   readonly backed_up?: string;
   readonly error?: string;
 }
 
 export interface ExecutorOptions {
   readonly dryRun?: boolean;
+  readonly update?: boolean;
   readonly onProgress?: (result: ExecutionResult) => void;
 }
 
@@ -69,6 +70,17 @@ const installItem = (
   }
 
   return shell.run(item.install).pipe(Effect.asVoid);
+};
+
+const updateItem = (
+  item: SystemItem,
+  shell: ShellService,
+): Effect.Effect<void, ShellError, ShellService> => {
+  // Update command is always a string (git updates handled via install strategy)
+  if (!item.update) {
+    return Effect.void;
+  }
+  return shell.run(item.update).pipe(Effect.asVoid);
 };
 
 type LockResult =
@@ -149,32 +161,72 @@ const executeItem = (
     const executeWithLock = Effect.gen(function* () {
       const isInstalled = yield* checkItem(item, shell);
 
+      // Case 1: Item is installed
       if (isInstalled) {
-        options?.onProgress?.({
+        // Check if we should run update
+        if (options?.update && item.update) {
+          // Case 1a: Dry run - show what would be updated
+          if (options?.dryRun) {
+            const result: ExecutionResult = {
+              name: item.name,
+              status: "installed",
+              action: "skipped",
+            };
+            options?.onProgress?.(result);
+            return result;
+          }
+
+          // Case 1b: Real run - execute update command
+          let backedUp: string | undefined;
+
+          if (item.backup) {
+            const backupResult = yield* backup.backup(item.backup);
+            if (!backupResult.skipped) {
+              backedUp = backupResult.destination;
+            }
+          }
+
+          yield* updateItem(item, shell);
+
+          const result: ExecutionResult = backedUp
+            ? {
+                name: item.name,
+                status: "installed",
+                action: "updated",
+                backed_up: backedUp,
+              }
+            : {
+                name: item.name,
+                status: "installed",
+                action: "updated",
+              };
+
+          options?.onProgress?.(result);
+          return result;
+        }
+
+        // Case 1c: No update needed - skip
+        const result: ExecutionResult = {
           name: item.name,
           status: "installed",
           action: "skipped",
-        });
-        return {
-          name: item.name,
-          status: "installed" as const,
-          action: "skipped" as const,
         };
+        options?.onProgress?.(result);
+        return result;
       }
 
+      // Case 2: Item is missing
       if (options?.dryRun) {
-        options?.onProgress?.({
+        const result: ExecutionResult = {
           name: item.name,
           status: "missing",
           action: "skipped",
-        });
-        return {
-          name: item.name,
-          status: "missing" as const,
-          action: "skipped" as const,
         };
+        options?.onProgress?.(result);
+        return result;
       }
 
+      // Install missing item
       let backedUp: string | undefined;
 
       if (item.backup) {

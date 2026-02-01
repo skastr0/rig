@@ -74,6 +74,7 @@ const handler = (options: CliOptions) =>
 
     const results = yield* executor.execute(plan, {
       dryRun: options.dryRun,
+      update: options.update,
       onProgress: reporter.printProgress,
     });
 

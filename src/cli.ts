@@ -8,6 +8,7 @@ export interface CliOptions {
   readonly tags: readonly string[];
   readonly only: readonly string[];
   readonly verbose: boolean;
+  readonly update: boolean;
 }
 
 const config = Options.withDefault(
@@ -41,6 +42,11 @@ const verbose = Options.boolean("verbose").pipe(
   Options.withDescription("Show detailed output including command execution"),
 );
 
+const update = Options.boolean("update").pipe(
+  Options.withAlias("u"),
+  Options.withDescription("Run update commands for installed items"),
+);
+
 const cliOptions = {
   config,
   profile,
@@ -48,6 +54,7 @@ const cliOptions = {
   tags,
   only,
   verbose,
+  update,
 };
 
 export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
@@ -59,6 +66,7 @@ export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effec
       tags: opts.tags,
       only: opts.only,
       verbose: opts.verbose,
+      update: opts.update,
     }),
   ).pipe(
     Command.withDescription(
@@ -72,6 +80,7 @@ Quick Start:
   system-setup                    # Apply configuration
   system-setup -p work            # Apply with 'work' profile
   system-setup -t dev -t editor   # Install items with dev OR editor tags
+  system-setup --update           # Update installed items
 
 Docs: See USAGE.md for examples and patterns`,
     ),
