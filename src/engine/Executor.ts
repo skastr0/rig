@@ -13,7 +13,7 @@ export type ItemStatus = "installed" | "missing" | "error";
 export interface ExecutionResult {
   readonly name: string;
   readonly status: ItemStatus;
-  readonly action: "skipped" | "installed" | "updated" | "failed";
+  readonly action: "skipped" | "installed" | "updated" | "would_update" | "failed";
   readonly backed_up?: string;
   readonly error?: string;
 }
@@ -170,7 +170,7 @@ const executeItem = (
             const result: ExecutionResult = {
               name: item.name,
               status: "installed",
-              action: "skipped",
+              action: "would_update",
             };
             options?.onProgress?.(result);
             return result;

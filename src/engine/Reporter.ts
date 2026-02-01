@@ -63,6 +63,11 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
         statusColor = c.green;
         actionText = "updated";
         break;
+      case "would_update":
+        statusIcon = symbols.dot;
+        statusColor = c.yellow;
+        actionText = "would update";
+        break;
       case "skipped":
         if (status === "installed") {
           statusIcon = symbols.check;
@@ -91,6 +96,7 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
   const printSummary = (results: readonly ExecutionResult[]) => {
     const installed = results.filter((r) => r.action === "installed").length;
     const updated = results.filter((r) => r.action === "updated").length;
+    const wouldUpdate = results.filter((r) => r.action === "would_update").length;
     const skipped = results.filter(
       (r) => r.action === "skipped" && r.status === "installed",
     ).length;
@@ -107,6 +113,9 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
     }
     if (updated > 0) {
       console.log(`  ${c.green}${symbols.check}${c.reset} ${updated} updated`);
+    }
+    if (wouldUpdate > 0) {
+      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${wouldUpdate} would be updated`);
     }
     if (skipped > 0) {
       console.log(`  ${c.dim}${symbols.check}${c.reset} ${skipped} already installed`);

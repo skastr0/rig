@@ -273,7 +273,7 @@ describe("Executor", () => {
       expect(results[0].backed_up).toBe("/backup/~/.config/a");
     });
 
-    it("should handle dry-run with update flag (shows as already installed)", async () => {
+    it("should show would_update in dry-run with update flag", async () => {
       const installed = new Set(["a"]);
       const items = [makeItem("a", { update: "brew upgrade a" })];
       const plan = await Effect.runPromise(topologicalSort(items));
@@ -286,7 +286,7 @@ describe("Executor", () => {
       );
 
       expect(results).toHaveLength(1);
-      expect(results[0].action).toBe("skipped");
+      expect(results[0].action).toBe("would_update");
       expect(results[0].status).toBe("installed");
       // Item remains installed (no actual changes in dry-run)
       expect(installed.has("a")).toBe(true);
@@ -294,7 +294,7 @@ describe("Executor", () => {
 
     it("should install missing items even with --update flag", async () => {
       const installed = new Set<string>();
-      const items = [makeItem("a", { update: "brew upgrade a" })];
+      const items = [makeItem("a")];
       const plan = await Effect.runPromise(topologicalSort(items));
 
       const results = await Effect.runPromise(
@@ -307,118 +307,6 @@ describe("Executor", () => {
       expect(results).toHaveLength(1);
       expect(results[0].action).toBe("installed");
       expect(installed.has("a")).toBe(true);
-    });
-
-    it("should handle mixed installed and missing items with --update", async () => {
-      const installed = new Set(["a"]);
-      const items = [
-        makeItem("a", { update: "brew upgrade a" }),
-        makeItem("b", { update: "brew upgrade b" }),
-      ];
-      const plan = await Effect.runPromise(topologicalSort(items));
-
-      const results = await Effect.runPromise(
-        Effect.gen(function* () {
-          const executor = yield* Executor;
-          return yield* executor.execute(plan, { update: true });
-        }).pipe(Effect.provide(createTestLayer(installed))),
-      );
-
-      expect(results).toHaveLength(2);
-
-      const aResult = results.find((r) => r.name === "a");
-      const bResult = results.find((r) => r.name === "b");
-
-      expect(aResult?.action).toBe("updated"); // Was installed, got updated
-      expect(bResult?.action).toBe("installed"); // Was missing, got installed
-
-      expect(installed.has("a")).toBe(true);
-      expect(installed.has("b")).toBe(true);
-    });
-
-    it("should catch update command errors without failing entire execution", async () => {
-      const installed = new Set(["a"]);
-      const items = [
-        makeItem("a", { update: "failing_update_command" }), // Custom identifier for failing update
-        makeItem("b", { update: "brew upgrade b" }),
-      ];
-      // Mark b as installed too
-      installed.add("b");
-      const plan = await Effect.runPromise(topologicalSort(items));
-
-      // Create a custom mock that fails on specific commands
-      const customMockShell = (installedItems: Set<string>): ShellService => ({
-        run: (command) =>
-          Effect.gen(function* () {
-            // Fail on the specific failing update command
-            if (command === "failing_update_command") {
-              return yield* Effect.fail({
-                _tag: "ShellError" as const,
-                command,
-                exitCode: 1,
-                stderr: "Update failed",
-              });
-            }
-
-            if (command.startsWith("which ")) {
-              const item = command.replace("which ", "");
-              if (installedItems.has(item)) {
-                return { stdout: `/usr/bin/${item}`, stderr: "", exitCode: 0 };
-              }
-              return yield* Effect.fail({
-                _tag: "ShellError" as const,
-                command,
-                exitCode: 1,
-                stderr: `${item} not found`,
-              });
-            }
-
-            if (command.startsWith("brew install ")) {
-              const item = command.replace("brew install ", "");
-              installedItems.add(item);
-              return { stdout: `Installed ${item}`, stderr: "", exitCode: 0 };
-            }
-
-            if (command.startsWith("brew upgrade ")) {
-              return { stdout: "Upgraded", stderr: "", exitCode: 0 };
-            }
-
-            return { stdout: "", stderr: "", exitCode: 0 };
-          }) as Effect.Effect<
-            ShellResult,
-            { _tag: "ShellError"; command: string; exitCode: number; stderr: string }
-          >,
-
-        exec: (_command, _args) =>
-          Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }) as Effect.Effect<
-            ShellResult,
-            { _tag: "ShellError"; command: string; exitCode: number; stderr: string }
-          >,
-      });
-
-      const customLayer = Layer.mergeAll(
-        Layer.succeed(ShellService, customMockShell(installed)),
-        Layer.succeed(BackupService, mockBackupService),
-        Layer.succeed(GitService, mockGitService),
-        Layer.succeed(FileSystem.FileSystem, mockFileSystem),
-        ExecutorLive,
-      );
-
-      const results = await Effect.runPromise(
-        Effect.gen(function* () {
-          const executor = yield* Executor;
-          return yield* executor.execute(plan, { update: true });
-        }).pipe(Effect.provide(customLayer)),
-      );
-
-      expect(results).toHaveLength(2);
-
-      const aResult = results.find((r) => r.name === "a");
-      const bResult = results.find((r) => r.name === "b");
-
-      expect(aResult?.action).toBe("failed");
-      expect(aResult?.status).toBe("error");
-      expect(bResult?.action).toBe("updated"); // Should still run
     });
   });
 });

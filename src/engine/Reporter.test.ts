@@ -88,6 +88,30 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("would install"))).toBe(true);
     });
 
+    it("should print updated status", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "installed",
+        action: "updated",
+      });
+
+      expect(output.some((line) => line.includes("test") && line.includes("updated"))).toBe(true);
+    });
+
+    it("should print would update for dry run with update", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "installed",
+        action: "would_update",
+      });
+
+      expect(output.some((line) => line.includes("would update"))).toBe(true);
+    });
+
     it("should indicate backup was made", () => {
       const reporter = createReporter({ noColor: true });
 
@@ -131,6 +155,21 @@ describe("Reporter", () => {
       reporter.printSummary(results);
 
       expect(output.some((line) => line.includes("2 files backed up"))).toBe(true);
+    });
+
+    it("should show updated and would_update counts", () => {
+      const reporter = createReporter({ noColor: true });
+
+      const results: ExecutionResult[] = [
+        { name: "a", status: "installed", action: "updated" },
+        { name: "b", status: "installed", action: "would_update" },
+        { name: "c", status: "installed", action: "updated" },
+      ];
+
+      reporter.printSummary(results);
+
+      expect(output.some((line) => line.includes("2 updated"))).toBe(true);
+      expect(output.some((line) => line.includes("1 would be updated"))).toBe(true);
     });
   });
 });
