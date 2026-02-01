@@ -1,0 +1,144 @@
+{
+  "profiles": {
+    "work": {
+      "exclude": ["gaming", "personal-repos"],
+      "items": [
+        {
+          "name": "slack",
+          "check": "/Applications/Slack.app",
+          "onCheck": "path-exists",
+          "install": "brew install --cask slack",
+          "group": "brew",
+          "tags": ["communication"]
+        }
+      ]
+    },
+    "personal": {
+      "exclude": ["work-tools"],
+      "items": []
+    }
+  },
+  "items": [
+    {
+      "name": "homebrew",
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
+      "tags": ["essential"]
+    },
+    {
+      "name": "neovim",
+      "check": "which nvim",
+      "install": "brew install neovim",
+      "update": "brew upgrade neovim",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["editor", "dev", "essential"]
+    },
+    {
+      "name": "ripgrep",
+      "check": "which rg",
+      "install": "brew install ripgrep",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["dev", "essential"]
+    },
+    {
+      "name": "fd",
+      "check": "which fd",
+      "install": "brew install fd",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["dev"]
+    },
+    {
+      "name": "fzf",
+      "check": "which fzf",
+      "install": "brew install fzf",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["dev"]
+    },
+    {
+      "name": "zoxide",
+      "check": "which zoxide",
+      "install": "brew install zoxide",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["dev"]
+    },
+    {
+      "name": "nvim-config",
+      "check": "~/.config/nvim/init.lua",
+      "onCheck": "path-exists",
+      "install": {
+        "source": "git",
+        "repo": "https://github.com/username/nvim-config.git",
+        "path": "~/.config/nvim"
+      },
+      "dependsOn": ["neovim"],
+      "backup": "~/.config/nvim",
+      "tags": ["editor", "config"]
+    },
+    {
+      "name": "asdf",
+      "check": "which asdf",
+      "install": "brew install asdf",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["dev"]
+    },
+    {
+      "name": "nodejs-plugin",
+      "check": "asdf plugin list | grep -q nodejs",
+      "install": "asdf plugin add nodejs",
+      "dependsOn": ["asdf"],
+      "tags": ["dev", "node"]
+    },
+    {
+      "name": "nodejs",
+      "check": "node --version | grep -q 22",
+      "install": "asdf install nodejs 22 && asdf global nodejs 22",
+      "dependsOn": ["nodejs-plugin"],
+      "tags": ["dev", "node"]
+    },
+    {
+      "name": "pnpm",
+      "check": "which pnpm",
+      "install": "npm install -g pnpm",
+      "dependsOn": ["nodejs"],
+      "tags": ["dev", "node"]
+    },
+    {
+      "name": "docker",
+      "check": "docker info > /dev/null 2>&1",
+      "install": "brew install --cask docker",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["devops"]
+    },
+    {
+      "name": "personal-repos",
+      "check": "~/Projects/personal",
+      "onCheck": "path-exists",
+      "install": "mkdir -p ~/Projects/personal",
+      "tags": ["personal"]
+    },
+    {
+      "name": "work-tools",
+      "check": "which work-cli",
+      "install": "brew install work-cli",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["work"]
+    },
+    {
+      "name": "gaming",
+      "check": "/Applications/Steam.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask steam",
+      "group": "brew",
+      "dependsOn": ["homebrew"],
+      "tags": ["gaming", "personal"]
+    }
+  ]
+}
