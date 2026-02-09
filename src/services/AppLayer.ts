@@ -4,6 +4,7 @@ import { ShellServiceLive } from "./ShellService.js";
 import { BackupServiceLive } from "./BackupService.js";
 import { ConfigServiceLive } from "./ConfigService.js";
 import { GitServiceLive } from "./GitService.js";
+import { BrewServiceLive } from "./BrewService.js";
 import { ExecutorLive } from "../engine/Executor.js";
 
 const ServicesLayer = Layer.mergeAll(
@@ -11,6 +12,7 @@ const ServicesLayer = Layer.mergeAll(
   BackupServiceLive,
   ConfigServiceLive,
   GitServiceLive,
+  BrewServiceLive,
   ExecutorLive,
 );
 

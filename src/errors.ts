@@ -16,6 +16,11 @@ export class GitError extends Data.TaggedError("GitError")<{
   readonly reason: string;
 }> {}
 
+export class BrewError extends Data.TaggedError("BrewError")<{
+  readonly formula_or_cask: string;
+  readonly reason: string;
+}> {}
+
 export class ValidationError extends Data.TaggedError("ValidationError")<{
   readonly issues: readonly string[];
 }> {}

@@ -106,6 +106,25 @@ Configuration is a JSON file (default: `./system-config.json`).
 { "install": "brew install neovim" }
 ```
 
+**Brew source (preferred for Homebrew)**:
+```json
+{
+  "install": {
+    "source": "brew",
+    "formula": "neovim"
+  }
+}
+```
+
+```json
+{
+  "install": {
+    "source": "brew",
+    "cask": "firefox"
+  }
+}
+```
+
 **Git clone**:
 ```json
 {

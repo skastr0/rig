@@ -195,7 +195,62 @@ system-setup --tags devops         # DevOps tools
 }
 ```
 
-**Important**: Always use `"group": "brew"` for Homebrew items - brew uses a lock file and can't run concurrently.
+**Important**: For string-based Homebrew commands, use `"group": "brew"`; native brew source items serialize automatically.
+
+### Native Brew Source
+
+You can migrate from string commands to the native brew source for safer defaults and clearer config.
+
+Before:
+
+```json
+{
+  "name": "neovim",
+  "check": "which nvim",
+  "install": "brew install neovim",
+  "group": "brew"
+}
+```
+
+After:
+
+```json
+{
+  "name": "neovim",
+  "check": "which nvim",
+  "install": {
+    "source": "brew",
+    "formula": "neovim"
+  }
+}
+```
+
+Native brew source also supports casks and taps:
+
+```json
+{
+  "name": "firefox",
+  "check": "/Applications/Firefox.app",
+  "onCheck": "path-exists",
+  "install": {
+    "source": "brew",
+    "cask": "firefox"
+  }
+}
+```
+
+```json
+{
+  "name": "nightly-neovim",
+  "check": "which nvim",
+  "install": {
+    "source": "brew",
+    "formula": "custom/tap/neovim-nightly",
+    "tap": "custom/tap",
+    "args": ["--HEAD"]
+  }
+}
+```
 
 ### APT (Debian/Ubuntu)
 
@@ -697,7 +752,9 @@ The shell may need to reload. Either:
 
 **Homebrew concurrent access error**
 
-Ensure all brew items have `"group": "brew"`:
+Prefer the native brew source (`"install": { "source": "brew", ... }`) because it automatically serializes brew installs.
+
+If you use string install commands, ensure all brew items have `"group": "brew"`:
 
 ```json
 { "name": "neovim", "install": "brew install neovim", "group": "brew" }

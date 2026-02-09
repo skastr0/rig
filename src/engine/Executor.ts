@@ -1,11 +1,12 @@
 import { Context, Effect, Layer, Ref, Deferred } from "effect";
 import { FileSystem } from "@effect/platform";
-import type { SystemItem, GitInstall } from "../schema/config.js";
+import type { SystemItem, GitInstall, BrewInstall } from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
 import { ShellService } from "../services/ShellService.js";
 import { BackupService } from "../services/BackupService.js";
 import { GitService } from "../services/GitService.js";
-import { ShellError, GitError, BackupError } from "../errors.js";
+import { BrewService } from "../services/BrewService.js";
+import { ShellError, GitError, BrewError, BackupError } from "../errors.js";
 import { expandPath } from "../utils.js";
 
 export type ItemStatus = "installed" | "missing" | "error";
@@ -31,14 +32,17 @@ export interface Executor {
   ) => Effect.Effect<
     readonly ExecutionResult[],
     never,
-    ShellService | BackupService | GitService | FileSystem.FileSystem
+    ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
   >;
 }
 
 export const Executor = Context.GenericTag<Executor>("Executor");
 
-const isGitInstall = (install: string | GitInstall): install is GitInstall =>
+const isGitInstall = (install: SystemItem["install"]): install is GitInstall =>
   typeof install === "object" && install.source === "git";
+
+const isBrewInstall = (install: SystemItem["install"]): install is BrewInstall =>
+  typeof install === "object" && install.source === "brew";
 
 const checkItem = (
   item: SystemItem,
@@ -64,9 +68,14 @@ const installItem = (
   item: SystemItem,
   shell: ShellService,
   git: GitService,
-): Effect.Effect<void, ShellError | GitError, ShellService> => {
+  brew: BrewService,
+): Effect.Effect<void, ShellError | GitError | BrewError, ShellService> => {
   if (isGitInstall(item.install)) {
     return git.clone(item.install);
+  }
+
+  if (isBrewInstall(item.install)) {
+    return brew.install(item.install);
   }
 
   return shell.run(item.install).pipe(Effect.asVoid);
@@ -147,16 +156,19 @@ const executeItem = (
   groupLocks: Ref.Ref<Map<string, Deferred.Deferred<void>>>,
 ): Effect.Effect<
   ExecutionResult,
-  ShellError | GitError | BackupError,
-  ShellService | BackupService | GitService | FileSystem.FileSystem
+  ShellError | GitError | BrewError | BackupError,
+  ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
     const shell = yield* ShellService;
     const backup = yield* BackupService;
     const git = yield* GitService;
+    const brew = yield* BrewService;
+
+    const effectiveGroup = isBrewInstall(item.install) ? (item.group ?? "brew") : item.group;
 
     // Acquire group lock atomically
-    const lock = yield* acquireGroupLock(item.group, groupLocks);
+    const lock = yield* acquireGroupLock(effectiveGroup, groupLocks);
 
     const executeWithLock = Effect.gen(function* () {
       const isInstalled = yield* checkItem(item, shell);
@@ -236,7 +248,7 @@ const executeItem = (
         }
       }
 
-      yield* installItem(item, shell, git);
+      yield* installItem(item, shell, git, brew);
 
       const result: ExecutionResult = backedUp
         ? {
@@ -257,16 +269,18 @@ const executeItem = (
 
     // Use ensuring to always release the lock, even on failure/interruption
     return yield* executeWithLock.pipe(
-      Effect.ensuring(releaseGroupLock(item.group, lock, groupLocks)),
+      Effect.ensuring(releaseGroupLock(effectiveGroup, lock, groupLocks)),
     );
   });
 
-const formatError = (error: ShellError | GitError | BackupError): string => {
+const formatError = (error: ShellError | GitError | BrewError | BackupError): string => {
   switch (error._tag) {
     case "ShellError":
       return `Command failed (${error.exitCode}): ${error.stderr}`;
     case "GitError":
       return `Git error for ${error.repo}: ${error.reason}`;
+    case "BrewError":
+      return `Brew error for ${error.formula_or_cask}: ${error.reason}`;
     case "BackupError":
       return `Backup error for ${error.path}: ${error.reason}`;
   }
@@ -279,7 +293,7 @@ const executeLevel = (
 ): Effect.Effect<
   readonly ExecutionResult[],
   never,
-  ShellService | BackupService | GitService | FileSystem.FileSystem
+  ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
 > =>
   Effect.forEach(
     items,

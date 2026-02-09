@@ -13,7 +13,27 @@ export const GitInstall = Schema.Struct({
 
 export type GitInstall = Schema.Schema.Type<typeof GitInstall>;
 
-export const InstallStrategy = Schema.Union(Schema.String.pipe(Schema.minLength(1)), GitInstall);
+export const BrewInstall = Schema.Struct({
+  source: Schema.Literal("brew"),
+  formula: Schema.optional(Schema.String),
+  cask: Schema.optional(Schema.String),
+  tap: Schema.optional(Schema.String),
+  args: Schema.optional(Schema.Array(Schema.String)),
+}).pipe(
+  Schema.filter((brew) => {
+    const hasFormula = brew.formula !== undefined;
+    const hasCask = brew.cask !== undefined;
+    return hasFormula !== hasCask || "Provide exactly one of formula or cask for brew source";
+  }),
+);
+
+export type BrewInstall = Schema.Schema.Type<typeof BrewInstall>;
+
+export const InstallStrategy = Schema.Union(
+  GitInstall,
+  BrewInstall,
+  Schema.String.pipe(Schema.minLength(1)),
+);
 
 export type InstallStrategy = Schema.Schema.Type<typeof InstallStrategy>;
 
