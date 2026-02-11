@@ -22,7 +22,9 @@ export interface ExecutionResult {
 export interface ExecutorOptions {
   readonly dryRun?: boolean;
   readonly update?: boolean;
+  readonly verbose?: boolean;
   readonly onProgress?: (result: ExecutionResult) => void;
+  readonly onVerbose?: (message: string) => void;
 }
 
 export interface Executor {
@@ -43,6 +45,71 @@ const isGitInstall = (install: SystemItem["install"]): install is GitInstall =>
 
 const isBrewInstall = (install: SystemItem["install"]): install is BrewInstall =>
   typeof install === "object" && install.source === "brew";
+
+const formatCommand = (command: string, args: readonly string[] = []): string =>
+  args.length > 0 ? `${command} ${args.join(" ")}` : command;
+
+const getInstallCommands = (install: SystemItem["install"]): readonly string[] => {
+  if (typeof install === "string") {
+    return [install];
+  }
+
+  if (isBrewInstall(install)) {
+    const commands: string[] = [];
+    if (install.tap) {
+      commands.push(formatCommand("brew", ["tap", install.tap]));
+    }
+
+    if (install.formula) {
+      commands.push(formatCommand("brew", ["install", install.formula, ...(install.args ?? [])]));
+      return commands;
+    }
+
+    if (install.cask) {
+      commands.push(
+        formatCommand("brew", ["install", "--cask", install.cask, ...(install.args ?? [])]),
+      );
+      return commands;
+    }
+
+    return commands;
+  }
+
+  if (isGitInstall(install)) {
+    const targetPath = expandPath(install.path);
+
+    if (install.sparse && install.sparse.length > 0) {
+      const cloneArgs = ["clone", "--filter=blob:none", "--no-checkout"];
+      if (install.branch) {
+        cloneArgs.push("-b", install.branch);
+      }
+      cloneArgs.push(install.repo, targetPath);
+
+      return [
+        formatCommand("git", cloneArgs),
+        formatCommand("git", ["-C", targetPath, "sparse-checkout", "init", "--cone"]),
+        formatCommand("git", ["-C", targetPath, "sparse-checkout", "set", ...install.sparse]),
+        formatCommand("git", ["-C", targetPath, "checkout"]),
+      ];
+    }
+
+    const cloneArgs = ["clone"];
+    if (install.branch) {
+      cloneArgs.push("-b", install.branch);
+    }
+    cloneArgs.push(install.repo, targetPath);
+
+    return [formatCommand("git", cloneArgs)];
+  }
+
+  return [];
+};
+
+const emitVerbose = (options: ExecutorOptions | undefined, message: string): void => {
+  if (options?.verbose) {
+    options.onVerbose?.(message);
+  }
+};
 
 const checkItem = (
   item: SystemItem,
@@ -171,6 +238,7 @@ const executeItem = (
     const lock = yield* acquireGroupLock(effectiveGroup, groupLocks);
 
     const executeWithLock = Effect.gen(function* () {
+      emitVerbose(options, `[${item.name}] check: ${item.check}`);
       const isInstalled = yield* checkItem(item, shell);
 
       // Case 1: Item is installed
@@ -179,6 +247,7 @@ const executeItem = (
         if (options?.update && item.update) {
           // Case 1a: Dry run - show what would be updated
           if (options?.dryRun) {
+            emitVerbose(options, `[${item.name}] would update: ${item.update}`);
             const result: ExecutionResult = {
               name: item.name,
               status: "installed",
@@ -192,12 +261,14 @@ const executeItem = (
           let backedUp: string | undefined;
 
           if (item.backup) {
+            emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
             const backupResult = yield* backup.backup(item.backup);
             if (!backupResult.skipped) {
               backedUp = backupResult.destination;
             }
           }
 
+          emitVerbose(options, `[${item.name}] update: ${item.update}`);
           yield* updateItem(item, shell);
 
           const result: ExecutionResult = backedUp
@@ -229,6 +300,10 @@ const executeItem = (
 
       // Case 2: Item is missing
       if (options?.dryRun) {
+        for (const command of getInstallCommands(item.install)) {
+          emitVerbose(options, `[${item.name}] would install: ${command}`);
+        }
+
         const result: ExecutionResult = {
           name: item.name,
           status: "missing",
@@ -242,10 +317,15 @@ const executeItem = (
       let backedUp: string | undefined;
 
       if (item.backup) {
+        emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
         const backupResult = yield* backup.backup(item.backup);
         if (!backupResult.skipped) {
           backedUp = backupResult.destination;
         }
+      }
+
+      for (const command of getInstallCommands(item.install)) {
+        emitVerbose(options, `[${item.name}] install: ${command}`);
       }
 
       yield* installItem(item, shell, git, brew);
@@ -273,16 +353,21 @@ const executeItem = (
     );
   });
 
+const formatReason = (reason: string, fallback: string): string => {
+  const trimmed = reason.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+};
+
 const formatError = (error: ShellError | GitError | BrewError | BackupError): string => {
   switch (error._tag) {
     case "ShellError":
-      return `Command failed (${error.exitCode}): ${error.stderr}`;
+      return `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}`;
     case "GitError":
-      return `Git error for ${error.repo}: ${error.reason}`;
+      return `Git error for ${error.repo}: ${formatReason(error.reason, "No reason provided")}`;
     case "BrewError":
-      return `Brew error for ${error.formula_or_cask}: ${error.reason}`;
+      return `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}`;
     case "BackupError":
-      return `Backup error for ${error.path}: ${error.reason}`;
+      return `Backup error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
   }
 };
 
@@ -308,6 +393,7 @@ const executeLevel = (
             error: formatError(error),
           };
           options?.onProgress?.(result);
+          emitVerbose(options, `[${item.name}] failure: ${result.error ?? "Unknown failure"}`);
           return Effect.succeed(result);
         }),
       ),

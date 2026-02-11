@@ -212,6 +212,47 @@ describe("Executor", () => {
     expect(progressResults[0].action).toBe("installed");
   });
 
+  it("should emit verbose command output when verbose mode is enabled", async () => {
+    const installed = new Set<string>();
+    const items = [makeItem("a")];
+    const plan = await Effect.runPromise(topologicalSort(items));
+
+    const verboseMessages: string[] = [];
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan, {
+          verbose: true,
+          onVerbose: (message) => verboseMessages.push(message),
+        });
+      }).pipe(Effect.provide(createTestLayer(installed))),
+    );
+
+    expect(verboseMessages).toContain("[a] check: which a");
+    expect(verboseMessages).toContain("[a] install: brew install a");
+  });
+
+  it("should not emit verbose command output when verbose mode is disabled", async () => {
+    const installed = new Set<string>();
+    const items = [makeItem("a")];
+    const plan = await Effect.runPromise(topologicalSort(items));
+
+    const verboseMessages: string[] = [];
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan, {
+          verbose: false,
+          onVerbose: (message) => verboseMessages.push(message),
+        });
+      }).pipe(Effect.provide(createTestLayer(installed))),
+    );
+
+    expect(verboseMessages).toHaveLength(0);
+  });
+
   it("should execute levels sequentially", async () => {
     const installed = new Set<string>();
     const items = [
@@ -252,6 +293,55 @@ describe("Executor", () => {
       expect(results).toHaveLength(1);
       expect(results[0].action).toBe("updated");
       expect(results[0].name).toBe("a");
+    });
+
+    it("should include command and reason when update fails", async () => {
+      const shell: ShellService = {
+        run: (command) =>
+          Effect.gen(function* () {
+            if (command.startsWith("which ")) {
+              return { stdout: "/usr/bin/a", stderr: "", exitCode: 0 };
+            }
+
+            if (command === "claude update") {
+              return yield* Effect.fail(
+                new ShellError({
+                  command,
+                  exitCode: 127,
+                  stderr: "claude: command not found",
+                }),
+              );
+            }
+
+            return { stdout: "", stderr: "", exitCode: 0 };
+          }),
+        exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      };
+
+      const items = [makeItem("a", { update: "claude update" })];
+      const plan = await Effect.runPromise(topologicalSort(items));
+
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+        ExecutorLive,
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, { update: true });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].action).toBe("failed");
+      expect(results[0].status).toBe("error");
+      expect(results[0].error).toContain('Command "claude update" failed with exit code 127');
+      expect(results[0].error).toContain("claude: command not found");
     });
 
     it("should skip update when --update flag is not set", async () => {

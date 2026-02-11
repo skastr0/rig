@@ -18,16 +18,30 @@ const symbols = {
   dot: "•",
 };
 
+const formatFailureReason = (error: string | undefined): string => {
+  const trimmed = error?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "Unknown failure";
+};
+
 export interface Reporter {
   readonly printPlan: (plan: PlanResult, dryRun?: boolean) => void;
   readonly printProgress: (result: ExecutionResult) => void;
   readonly printSummary: (results: readonly ExecutionResult[]) => void;
+  readonly printVerbose: (message: string) => void;
 }
 
-export const createReporter = (options?: { noColor?: boolean }): Reporter => {
+export const createReporter = (options?: { noColor?: boolean; verbose?: boolean }): Reporter => {
   const c = options?.noColor
     ? (Object.fromEntries(Object.keys(colors).map((k) => [k, ""])) as typeof colors)
     : colors;
+
+  const printVerbose = (message: string) => {
+    if (!options?.verbose) {
+      return;
+    }
+
+    console.log(`    ${c.dim}${symbols.dot}${c.reset} ${c.dim}${message}${c.reset}`);
+  };
 
   const printPlan = (plan: PlanResult, dryRun = false) => {
     if (dryRun) {
@@ -46,7 +60,7 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
   };
 
   const printProgress = (result: ExecutionResult) => {
-    const { name, status, action, backed_up } = result;
+    const { name, status, action, backed_up, error } = result;
 
     let statusIcon: string;
     let statusColor: string;
@@ -91,9 +105,14 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
     console.log(
       `  ${statusColor}${statusIcon}${c.reset} ${name} ${c.dim}${symbols.arrow}${c.reset} ${actionText}${backupInfo}`,
     );
+
+    if (action === "failed") {
+      console.log(`    ${c.red}${symbols.arrow}${c.reset} Reason: ${formatFailureReason(error)}`);
+    }
   };
 
   const printSummary = (results: readonly ExecutionResult[]) => {
+    const failedResults = results.filter((r) => r.action === "failed");
     const installed = results.filter((r) => r.action === "installed").length;
     const updated = results.filter((r) => r.action === "updated").length;
     const wouldUpdate = results.filter((r) => r.action === "would_update").length;
@@ -103,7 +122,7 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
     const wouldInstall = results.filter(
       (r) => r.action === "skipped" && r.status === "missing",
     ).length;
-    const failed = results.filter((r) => r.action === "failed").length;
+    const failed = failedResults.length;
     const backedUp = results.filter((r) => r.backed_up).length;
 
     console.log(`\n${c.bold}Summary:${c.reset}`);
@@ -125,6 +144,11 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
     }
     if (failed > 0) {
       console.log(`  ${c.red}${symbols.cross}${c.reset} ${failed} failed`);
+      failedResults.forEach((result) => {
+        console.log(
+          `    ${c.red}${symbols.arrow}${c.reset} ${result.name}: ${formatFailureReason(result.error)}`,
+        );
+      });
     }
     if (backedUp > 0) {
       console.log(`  ${c.cyan}${symbols.arrow}${c.reset} ${backedUp} files backed up`);
@@ -133,7 +157,7 @@ export const createReporter = (options?: { noColor?: boolean }): Reporter => {
     console.log("");
   };
 
-  return { printPlan, printProgress, printSummary };
+  return { printPlan, printProgress, printSummary, printVerbose };
 };
 
 export const defaultReporter = createReporter();

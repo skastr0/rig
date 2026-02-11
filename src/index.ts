@@ -56,7 +56,7 @@ const formatError = (error: unknown): string => {
 
 const handler = (options: CliOptions) =>
   Effect.gen(function* () {
-    const reporter = createReporter();
+    const reporter = createReporter({ verbose: options.verbose });
     const configService = yield* ConfigService;
     const executor = yield* Executor;
 
@@ -75,7 +75,9 @@ const handler = (options: CliOptions) =>
     const results = yield* executor.execute(plan, {
       dryRun: options.dryRun,
       update: options.update,
+      verbose: options.verbose,
       onProgress: reporter.printProgress,
+      onVerbose: reporter.printVerbose,
     });
 
     reporter.printSummary(results);

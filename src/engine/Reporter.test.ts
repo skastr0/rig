@@ -124,6 +124,21 @@ describe("Reporter", () => {
 
       expect(output.some((line) => line.includes("backed up"))).toBe(true);
     });
+
+    it("should print failure reason", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "error",
+        action: "failed",
+        error: 'Command "claude update" failed with exit code 1: network unavailable',
+      });
+
+      expect(output.some((line) => line.includes("failed"))).toBe(true);
+      expect(output.some((line) => line.includes("Reason:"))).toBe(true);
+      expect(output.some((line) => line.includes("network unavailable"))).toBe(true);
+    });
   });
 
   describe("printSummary", () => {
@@ -170,6 +185,43 @@ describe("Reporter", () => {
 
       expect(output.some((line) => line.includes("2 updated"))).toBe(true);
       expect(output.some((line) => line.includes("1 would be updated"))).toBe(true);
+    });
+
+    it("should print failure details in summary", () => {
+      const reporter = createReporter({ noColor: true });
+
+      const results: ExecutionResult[] = [
+        {
+          name: "claude-code",
+          status: "error",
+          action: "failed",
+          error: 'Command "claude update" failed with exit code 1: network unavailable',
+        },
+      ];
+
+      reporter.printSummary(results);
+
+      expect(output.some((line) => line.includes("1 failed"))).toBe(true);
+      expect(output.some((line) => line.includes("claude-code:"))).toBe(true);
+      expect(output.some((line) => line.includes("network unavailable"))).toBe(true);
+    });
+  });
+
+  describe("printVerbose", () => {
+    it("should print verbose messages when verbose mode is enabled", () => {
+      const reporter = createReporter({ noColor: true, verbose: true });
+
+      reporter.printVerbose("[test] install: brew install test");
+
+      expect(output.some((line) => line.includes("[test] install: brew install test"))).toBe(true);
+    });
+
+    it("should not print verbose messages when verbose mode is disabled", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printVerbose("[test] install: brew install test");
+
+      expect(output).toHaveLength(0);
     });
   });
 });
