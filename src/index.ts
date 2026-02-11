@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { BunRuntime } from "@effect/platform-bun";
 import { runCli, type CliOptions } from "./cli.js";
 import { ConfigService } from "./services/ConfigService.js";
@@ -85,6 +85,12 @@ const handler = (options: CliOptions) =>
     Effect.catchAll((error) =>
       Effect.sync(() => {
         console.error(`\n${formatError(error)}\n`);
+        process.exit(1);
+      }),
+    ),
+    Effect.catchAllCause((cause) =>
+      Effect.sync(() => {
+        console.error(`\nUnexpected crash:\n${Cause.pretty(cause)}\n`);
         process.exit(1);
       }),
     ),

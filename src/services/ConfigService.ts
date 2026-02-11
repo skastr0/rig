@@ -23,7 +23,15 @@ export const ConfigServiceLive = Layer.succeed(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
 
-        const exists = yield* fs.exists(configPath).pipe(Effect.orDie);
+        const exists = yield* fs.exists(configPath).pipe(
+          Effect.mapError(
+            () =>
+              new ConfigError({
+                message: "Failed to access config file",
+                path: configPath,
+              }),
+          ),
+        );
         if (!exists) {
           return yield* Effect.fail(
             new ConfigError({ message: "Config file not found", path: configPath }),
