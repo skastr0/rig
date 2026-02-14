@@ -30,7 +30,7 @@ const spawnProcess = (
 ): Effect.Effect<ShellResult, ShellError> =>
   Effect.tryPromise({
     try: async () => {
-      const timeout = options?.timeout ? Duration.toMillis(options.timeout) : 30_000;
+      const timeout = options?.timeout ? Duration.toMillis(options.timeout) : 600_000;
 
       const proc = Bun.spawn(args as string[], {
         stdout: "pipe",
