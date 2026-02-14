@@ -59,6 +59,8 @@ async function install() {
   console.log(`Installing to ${destPath}...`);
   await Bun.$`cp ${binaryPath} ${destPath}`;
   await Bun.$`chmod +x ${destPath}`;
+  await Bun.$`codesign --sign - --force ${destPath}`;
+  console.log("Binary signed (ad-hoc)");
 
   console.log(`\nInstalled ${BINARY_NAME} to ${destPath}`);
 
