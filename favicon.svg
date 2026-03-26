@@ -1,0 +1,101 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-ss" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e1420"/>
+      <stop offset="100%" stop-color="#080c14"/>
+    </linearGradient>
+    <linearGradient id="chip-top" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#90b8e0" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#5078a0" stop-opacity="0.15"/>
+    </linearGradient>
+    <filter id="ss-glow">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="ss-bloom">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <filter id="ss-soft">
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg-ss)" rx="96"/>
+  <ellipse cx="256" cy="256" rx="150" ry="150" fill="#70a8e0" opacity="0.06" filter="url(#ss-bloom)"/>
+
+  <!-- PCB traces -->
+  <line x1="90" y1="256" x2="422" y2="256" stroke="#5088b8" stroke-width="2" opacity="0.42"/>
+  <line x1="120" y1="200" x2="392" y2="200" stroke="#4878a8" stroke-width="1.1" opacity="0.3"/>
+  <line x1="120" y1="312" x2="392" y2="312" stroke="#4878a8" stroke-width="1.1" opacity="0.3"/>
+  <line x1="180" y1="130" x2="180" y2="382" stroke="#4878a8" stroke-width="0.9" opacity="0.25"/>
+  <line x1="256" y1="120" x2="256" y2="392" stroke="#5088b8" stroke-width="1.3" opacity="0.32"/>
+  <line x1="332" y1="130" x2="332" y2="382" stroke="#4878a8" stroke-width="0.9" opacity="0.25"/>
+
+  <!-- Routing -->
+  <polyline points="180,200 210,170 256,170" fill="none" stroke="#4878a8" stroke-width="0.7" opacity="0.2"/>
+  <polyline points="332,312 362,342 362,370" fill="none" stroke="#4878a8" stroke-width="0.7" opacity="0.2"/>
+  <polyline points="180,312 150,342 150,365" fill="none" stroke="#4878a8" stroke-width="0.7" opacity="0.18"/>
+
+  <!-- Vias -->
+  <circle cx="180" cy="256" r="3.5" fill="#80b0e0" opacity="0.45"/>
+  <circle cx="332" cy="256" r="3.5" fill="#80b0e0" opacity="0.45"/>
+  <circle cx="256" cy="200" r="3.5" fill="#80b0e0" opacity="0.42"/>
+  <circle cx="256" cy="312" r="3.5" fill="#80b0e0" opacity="0.42"/>
+  <circle cx="180" cy="200" r="3" fill="#6898c8" opacity="0.35"/>
+  <circle cx="332" cy="200" r="3" fill="#6898c8" opacity="0.35"/>
+  <circle cx="180" cy="312" r="3" fill="#6898c8" opacity="0.35"/>
+  <circle cx="332" cy="312" r="3" fill="#6898c8" opacity="0.35"/>
+
+  <!-- Central chip -->
+  <rect x="226" y="226" width="60" height="60" rx="4" fill="url(#chip-top)" stroke="#90b8e0" stroke-width="1.6" opacity="0.72"/>
+  <g stroke="#80b0e0" stroke-width="1" opacity="0.5">
+    <line x1="240" y1="226" x2="240" y2="214"/><line x1="256" y1="226" x2="256" y2="214"/><line x1="272" y1="226" x2="272" y2="214"/>
+    <line x1="240" y1="286" x2="240" y2="298"/><line x1="256" y1="286" x2="256" y2="298"/><line x1="272" y1="286" x2="272" y2="298"/>
+    <line x1="226" y1="244" x2="214" y2="244"/><line x1="226" y1="256" x2="214" y2="256"/><line x1="226" y1="268" x2="214" y2="268"/>
+    <line x1="286" y1="244" x2="298" y2="244"/><line x1="286" y1="256" x2="298" y2="256"/><line x1="286" y1="268" x2="298" y2="268"/>
+  </g>
+  <rect x="242" y="242" width="28" height="28" rx="2" fill="none" stroke="#a0c8f0" stroke-width="0.7" opacity="0.4"/>
+  <circle cx="256" cy="256" r="6" fill="#90b8e0" opacity="0.22" filter="url(#ss-glow)"/>
+  <circle cx="256" cy="256" r="3" fill="#d0e4ff" opacity="0.7"/>
+
+  <!-- Dependency blocks -->
+  <!-- Top-left: repo -->
+  <rect x="143" y="153" width="44" height="28" rx="3" fill="url(#chip-top)" stroke="#7098c8" stroke-width="1.1" opacity="0.6"/>
+  <circle cx="158" cy="167" r="5" fill="none" stroke="#90b8e0" stroke-width="0.8" opacity="0.45"/>
+  <line x1="158" y1="162" x2="158" y2="172" stroke="#90b8e0" stroke-width="0.6" opacity="0.35"/>
+  <line x1="153" y1="167" x2="163" y2="167" stroke="#90b8e0" stroke-width="0.6" opacity="0.35"/>
+
+  <!-- Top-right: tool -->
+  <rect x="314" y="153" width="44" height="28" rx="3" fill="url(#chip-top)" stroke="#7098c8" stroke-width="1.1" opacity="0.6"/>
+  <line x1="330" y1="161" x2="344" y2="175" stroke="#90b8e0" stroke-width="0.9" opacity="0.42"/>
+  <circle cx="330" cy="161" r="3.5" fill="none" stroke="#90b8e0" stroke-width="0.7" opacity="0.38"/>
+
+  <!-- Bottom-left: script -->
+  <rect x="126" y="328" width="40" height="26" rx="3" fill="url(#chip-top)" stroke="#6088b0" stroke-width="1" opacity="0.52"/>
+  <text x="135" y="346" font-family="monospace" font-size="10" fill="#90b8e0" opacity="0.5">$_</text>
+
+  <!-- Bottom-right: config -->
+  <rect x="343" y="328" width="40" height="26" rx="3" fill="url(#chip-top)" stroke="#6088b0" stroke-width="1" opacity="0.52"/>
+  <text x="350" y="346" font-family="monospace" font-size="9" fill="#90b8e0" opacity="0.45">{..}</text>
+
+  <!-- SMD components -->
+  <rect x="203" y="252" width="10" height="7" rx="1" fill="#6898c8" opacity="0.3"/>
+  <rect x="299" y="252" width="10" height="7" rx="1" fill="#6898c8" opacity="0.3"/>
+  <rect x="252" y="298" width="7" height="10" rx="1" fill="#6898c8" opacity="0.26"/>
+  <rect x="252" y="203" width="7" height="10" rx="1" fill="#6898c8" opacity="0.26"/>
+
+  <!-- Checkmarks -->
+  <g stroke="#80d0f0" stroke-width="1.2" opacity="0.5" stroke-linecap="round">
+    <polyline points="130,252 134,258 142,248"/>
+    <polyline points="354,252 358,258 366,248"/>
+  </g>
+  <g stroke="#6098b8" stroke-width="1" opacity="0.3" stroke-linecap="round">
+    <polyline points="390,252 394,258 402,248"/>
+  </g>
+
+  <!-- JSON source -->
+  <rect x="230" y="106" width="52" height="20" rx="3" fill="none" stroke="#7098c8" stroke-width="0.9" opacity="0.45"/>
+  <text x="240" y="120" font-family="monospace" font-size="9" fill="#90b8e0" opacity="0.5">.json</text>
+  <line x1="256" y1="126" x2="256" y2="142" stroke="#7098c8" stroke-width="0.7" opacity="0.3"/>
+  <polygon points="252,142 256,150 260,142" fill="#80b0e0" opacity="0.32"/>
+</svg>
