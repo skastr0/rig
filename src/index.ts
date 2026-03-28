@@ -6,7 +6,7 @@ import { AppLayer } from "./services/AppLayer.js";
 import { topologicalSort } from "./engine/Planner.js";
 import { Executor } from "./engine/Executor.js";
 import { createReporter } from "./engine/Reporter.js";
-import type { SystemItem } from "./schema/config.js";
+import { selectItems } from "./engine/Selection.js";
 import {
   ConfigError,
   ValidationError,
@@ -15,22 +15,6 @@ import {
   GitError,
   BackupError,
 } from "./errors.js";
-
-const filterItems = (items: readonly SystemItem[], options: CliOptions): readonly SystemItem[] => {
-  let filtered = items;
-
-  if (options.only.length > 0) {
-    const onlySet = new Set(options.only);
-    filtered = filtered.filter((item) => onlySet.has(item.name));
-  }
-
-  if (options.tags.length > 0) {
-    const tagsSet = new Set(options.tags);
-    filtered = filtered.filter((item) => item.tags?.some((tag) => tagsSet.has(tag)));
-  }
-
-  return filtered;
-};
 
 const formatError = (error: unknown): string => {
   if (error instanceof ConfigError) {
@@ -61,7 +45,7 @@ const handler = (options: CliOptions) =>
     const executor = yield* Executor;
 
     const config = yield* configService.load(options.config, options.profile);
-    const items = filterItems(config.items, options);
+    const items = selectItems(config.items, options);
 
     if (items.length === 0) {
       yield* Effect.log("No items to process");

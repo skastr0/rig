@@ -28,13 +28,19 @@ const dryRun = Options.boolean("dry-run").pipe(
 const tags = Options.withDefault(
   Options.text("tags").pipe(Options.withAlias("t"), Options.repeated),
   [],
-).pipe(Options.withDescription("Filter items by tags (can be repeated: -t dev -t editor)"));
+).pipe(
+  Options.withDescription(
+    "Filter items by tags and include required dependencies (can be repeated: -t dev -t editor)",
+  ),
+);
 
 const only = Options.withDefault(
   Options.text("only").pipe(Options.withAlias("o"), Options.repeated),
   [],
 ).pipe(
-  Options.withDescription("Install specific items only (can be repeated: -o neovim -o ripgrep)"),
+  Options.withDescription(
+    "Install specific items and include required dependencies (can be repeated: -o neovim -o ripgrep)",
+  ),
 );
 
 const verbose = Options.boolean("verbose").pipe(
