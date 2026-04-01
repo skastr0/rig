@@ -344,6 +344,50 @@ describe("Executor", () => {
       expect(results[0].error).toContain("claude: command not found");
     });
 
+    it("should emit successful command output in verbose mode", async () => {
+      const shell: ShellService = {
+        run: (command) =>
+          command.startsWith("which ")
+            ? Effect.succeed({ stdout: "/usr/bin/a", stderr: "", exitCode: 0 })
+            : command === "tool update"
+              ? Effect.succeed({
+                  stdout: "Updated active version",
+                  stderr: "warning: extra install skipped",
+                  exitCode: 0,
+                })
+              : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      };
+
+      const items = [makeItem("a", { update: "tool update" })];
+      const plan = await Effect.runPromise(topologicalSort(items));
+      const verboseMessages: string[] = [];
+
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+        ExecutorLive,
+      );
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            update: true,
+            verbose: true,
+            onVerbose: (message) => verboseMessages.push(message),
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(verboseMessages).toContain("[a] update: tool update");
+      expect(verboseMessages).toContain("[a] stdout: Updated active version");
+      expect(verboseMessages).toContain("[a] stderr: warning: extra install skipped");
+    });
+
     it("should skip update when --update flag is not set", async () => {
       const installed = new Set(["a"]);
       const items = [makeItem("a", { update: "brew upgrade a" })];

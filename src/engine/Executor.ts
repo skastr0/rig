@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Ref, Deferred } from "effect";
 import { FileSystem } from "@effect/platform";
 import type { SystemItem, GitInstall, BrewInstall } from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
-import { ShellService } from "../services/ShellService.js";
+import { ShellService, type ShellResult } from "../services/ShellService.js";
 import { BackupService } from "../services/BackupService.js";
 import { GitService } from "../services/GitService.js";
 import { BrewService } from "../services/BrewService.js";
@@ -111,6 +111,41 @@ const emitVerbose = (options: ExecutorOptions | undefined, message: string): voi
   }
 };
 
+const emitCommandStream = (
+  itemName: string,
+  stream: "stdout" | "stderr",
+  output: string,
+  options: ExecutorOptions | undefined,
+): void => {
+  const normalized = output.trimEnd();
+  if (normalized.trim().length === 0) {
+    return;
+  }
+
+  for (const line of normalized.split(/\r?\n/)) {
+    emitVerbose(options, `[${itemName}] ${stream}: ${line}`);
+  }
+};
+
+const emitCommandOutput = (
+  itemName: string,
+  result: ShellResult,
+  options: ExecutorOptions | undefined,
+): void => {
+  emitCommandStream(itemName, "stdout", result.stdout, options);
+  emitCommandStream(itemName, "stderr", result.stderr, options);
+};
+
+const runShellCommand = (
+  itemName: string,
+  command: string,
+  shell: ShellService,
+  options: ExecutorOptions | undefined,
+): Effect.Effect<ShellResult, ShellError> =>
+  shell
+    .run(command)
+    .pipe(Effect.tap((result) => Effect.sync(() => emitCommandOutput(itemName, result, options))));
+
 const checkItem = (
   item: SystemItem,
   shell: ShellService,
@@ -136,6 +171,7 @@ const installItem = (
   shell: ShellService,
   git: GitService,
   brew: BrewService,
+  options: ExecutorOptions | undefined,
 ): Effect.Effect<void, ShellError | GitError | BrewError, ShellService> => {
   if (isGitInstall(item.install)) {
     return git.clone(item.install);
@@ -145,18 +181,19 @@ const installItem = (
     return brew.install(item.install);
   }
 
-  return shell.run(item.install).pipe(Effect.asVoid);
+  return runShellCommand(item.name, item.install, shell, options).pipe(Effect.asVoid);
 };
 
 const updateItem = (
   item: SystemItem,
   shell: ShellService,
+  options: ExecutorOptions | undefined,
 ): Effect.Effect<void, ShellError, ShellService> => {
   // Update command is always a string (git updates handled via install strategy)
   if (!item.update) {
     return Effect.void;
   }
-  return shell.run(item.update).pipe(Effect.asVoid);
+  return runShellCommand(item.name, item.update, shell, options).pipe(Effect.asVoid);
 };
 
 type LockResult =
@@ -269,7 +306,7 @@ const executeItem = (
           }
 
           emitVerbose(options, `[${item.name}] update: ${item.update}`);
-          yield* updateItem(item, shell);
+          yield* updateItem(item, shell, options);
 
           const result: ExecutionResult = backedUp
             ? {
@@ -328,7 +365,7 @@ const executeItem = (
         emitVerbose(options, `[${item.name}] install: ${command}`);
       }
 
-      yield* installItem(item, shell, git, brew);
+      yield* installItem(item, shell, git, brew, options);
 
       const result: ExecutionResult = backedUp
         ? {
