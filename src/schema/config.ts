@@ -3,6 +3,8 @@ import { Schema } from "effect";
 // Git URL pattern: supports https://, git@, git://, ssh:// formats
 const gitUrlPattern = /^(https?:\/\/|git@|git:\/\/|ssh:\/\/).+/;
 
+const TimeoutInput = Schema.Number.pipe(Schema.nonNegative());
+
 export const GitInstall = Schema.Struct({
   source: Schema.Literal("git"),
   repo: Schema.String.pipe(Schema.minLength(1), Schema.pattern(gitUrlPattern)),
@@ -36,6 +38,7 @@ export const InstallStrategy = Schema.Union(
 );
 
 export type InstallStrategy = Schema.Schema.Type<typeof InstallStrategy>;
+export type TimeoutInput = Schema.Schema.Type<typeof TimeoutInput>;
 
 export const SystemItem = Schema.Struct({
   name: Schema.String,
@@ -47,6 +50,7 @@ export const SystemItem = Schema.Struct({
   dependsOn: Schema.optional(Schema.Array(Schema.String)),
   backup: Schema.optional(Schema.String),
   tags: Schema.optional(Schema.Array(Schema.String)),
+  timeout: Schema.optional(TimeoutInput),
 });
 
 export type SystemItem = Schema.Schema.Type<typeof SystemItem>;

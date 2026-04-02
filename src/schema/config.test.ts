@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Schema } from "effect";
-import { BrewInstall } from "./config.js";
+import { BrewInstall, SystemItem } from "./config.js";
 
 const decodeBrewInstall = Schema.decodeUnknown(BrewInstall);
+const decodeSystemItem = Schema.decodeUnknown(SystemItem);
 
 describe("BrewInstall schema", () => {
   it("accepts formula installs", async () => {
@@ -49,6 +50,24 @@ describe("BrewInstall schema", () => {
       formula: "custom/tap/formula",
       tap: "custom/tap",
       args: ["--HEAD"],
+    });
+  });
+
+  it("accepts per-item timeout values", async () => {
+    const parsed = await Effect.runPromise(
+      decodeSystemItem({
+        name: "neovim",
+        check: "which nvim",
+        install: "brew install neovim",
+        timeout: 5_000,
+      }),
+    );
+
+    expect(parsed).toEqual({
+      name: "neovim",
+      check: "which nvim",
+      install: "brew install neovim",
+      timeout: 5_000,
     });
   });
 
