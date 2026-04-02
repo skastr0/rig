@@ -18,6 +18,7 @@ const makeItem = (
     backup?: string;
     onCheck?: "exit-code" | "path-exists";
     update?: string;
+    timeout?: number;
   },
 ): SystemItem => ({
   name,
@@ -28,6 +29,7 @@ const makeItem = (
   group: opts?.group,
   backup: opts?.backup,
   onCheck: opts?.onCheck,
+  timeout: opts?.timeout,
 });
 
 const makeBrewItem = (
@@ -39,6 +41,7 @@ const makeBrewItem = (
     cask?: string;
     tap?: string;
     args?: string[];
+    timeout?: number;
   },
 ): SystemItem => ({
   name,
@@ -58,10 +61,11 @@ const makeBrewItem = (
       },
   dependsOn: opts?.dependsOn,
   group: opts?.group,
+  timeout: opts?.timeout,
 });
 
 const mockShellService = (installedItems: Set<string>): ShellService => ({
-  run: (command) =>
+  run: (command, _options?) =>
     Effect.gen(function* () {
       if (command.startsWith("which ")) {
         const item = command.replace("which ", "");
@@ -105,7 +109,7 @@ const mockShellService = (installedItems: Set<string>): ShellService => ({
       return { stdout: "", stderr: "", exitCode: 0 };
     }),
 
-  exec: (_command, _args) => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+  exec: (_command, _args, _options?) => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
 });
 
 const mockBackupService: BackupService = {
@@ -118,11 +122,11 @@ const mockBackupService: BackupService = {
 };
 
 const mockGitService: GitService = {
-  clone: () => Effect.void as any,
+  clone: (_install, _options?) => Effect.void as any,
 };
 
 const mockBrewService: BrewService = {
-  install: () => Effect.void as any,
+  install: (_brew, _options?) => Effect.void as any,
 };
 
 const mockFileSystem = {
@@ -274,6 +278,227 @@ describe("Executor", () => {
     );
 
     expect(executionOrder).toEqual(["a", "b", "c"]);
+  });
+
+  it("continues unrelated dependency lanes after a failure", async () => {
+    const installed = new Set<string>();
+    const shell: ShellService = {
+      run: (command) =>
+        Effect.gen(function* () {
+          if (command.startsWith("which ")) {
+            const item = command.replace("which ", "");
+            if (installed.has(item)) {
+              return { stdout: `/usr/bin/${item}`, stderr: "", exitCode: 0 };
+            }
+            return yield* Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: `${item} not found`,
+              }),
+            );
+          }
+
+          if (command === "brew install a") {
+            return yield* Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "network unavailable",
+              }),
+            );
+          }
+
+          if (command.startsWith("brew install ")) {
+            const item = command.replace("brew install ", "");
+            installed.add(item);
+            return { stdout: `Installed ${item}`, stderr: "", exitCode: 0 };
+          }
+
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const items = [
+      makeItem("a"),
+      makeItem("b"),
+      makeItem("c", { dependsOn: ["a"] }),
+      makeItem("d", { dependsOn: ["b"] }),
+    ];
+    const plan = await Effect.runPromise(topologicalSort(items));
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results).toEqual([
+      expect.objectContaining({ name: "a", action: "failed", status: "error" }),
+      expect.objectContaining({ name: "b", action: "installed", status: "installed" }),
+      expect.objectContaining({ name: "c", action: "blocked", status: "blocked" }),
+      expect.objectContaining({ name: "d", action: "installed", status: "installed" }),
+    ]);
+    expect(installed.has("b")).toBe(true);
+    expect(installed.has("d")).toBe(true);
+  });
+
+  it("blocks transitive dependents after an upstream failure", async () => {
+    const shell: ShellService = {
+      run: (command) =>
+        command.startsWith("which ")
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not installed",
+              }),
+            )
+          : command === "brew install a"
+            ? Effect.fail(
+                new ShellError({
+                  command,
+                  exitCode: 1,
+                  stderr: "boom",
+                }),
+              )
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([
+        makeItem("a"),
+        makeItem("b", { dependsOn: ["a"] }),
+        makeItem("c", { dependsOn: ["b"] }),
+      ]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "failed" }));
+    expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
+    expect(results[1].error).toContain("a");
+    expect(results[2]).toEqual(expect.objectContaining({ name: "c", action: "blocked" }));
+    expect(results[2].error).toContain("b");
+  });
+
+  it("marks timed out items separately from generic failures", async () => {
+    const shell: ShellService = {
+      run: (command) =>
+        command.startsWith("which ")
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not installed",
+              }),
+            )
+          : command === "brew install a"
+            ? Effect.fail(
+                new ShellError({
+                  command,
+                  exitCode: -1,
+                  stderr: "Timed out after 5ms",
+                  timedOut: true,
+                  timeoutMs: 5,
+                }),
+              )
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([makeItem("a"), makeItem("b", { dependsOn: ["a"] })]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "timed_out" }));
+    expect(results[0].error).toContain("timed out");
+    expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
+  });
+
+  it("passes configured timeout to shell checks and installs", async () => {
+    const observedTimeouts: Array<unknown> = [];
+    const shell: ShellService = {
+      run: (command, options) =>
+        Effect.gen(function* () {
+          observedTimeouts.push(options?.timeout);
+
+          if (command.startsWith("which ")) {
+            return yield* Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not installed",
+              }),
+            );
+          }
+
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(topologicalSort([makeItem("a", { timeout: 5_000 })]));
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(observedTimeouts).toEqual([5_000, 5_000]);
   });
 
   // Update mode tests
@@ -496,7 +721,7 @@ describe("Executor", () => {
       };
 
       const brew: BrewService = {
-        install: () =>
+        install: (_brew, _options?) =>
           Effect.gen(function* () {
             activeInstalls += 1;
             maxConcurrentInstalls = Math.max(maxConcurrentInstalls, activeInstalls);
@@ -554,7 +779,7 @@ describe("Executor", () => {
       };
 
       const brew: BrewService = {
-        install: () =>
+        install: (_brew, _options?) =>
           Effect.gen(function* () {
             activeInstalls += 1;
             maxConcurrentInstalls = Math.max(maxConcurrentInstalls, activeInstalls);
@@ -613,7 +838,7 @@ describe("Executor", () => {
       };
 
       const brew: BrewService = {
-        install: () =>
+        install: (_brew, _options?) =>
           Effect.gen(function* () {
             activeInstalls += 1;
             maxConcurrentInstalls = Math.max(maxConcurrentInstalls, activeInstalls);
@@ -665,7 +890,7 @@ describe("Executor", () => {
       };
 
       const brew: BrewService = {
-        install: () =>
+        install: (_brew, _options?) =>
           Effect.sync(() => {
             brewInstallCalls += 1;
           }),
@@ -744,6 +969,51 @@ describe("Executor", () => {
         { command: "brew", args: ["tap", "custom/tap"] },
         { command: "brew", args: ["install", "custom/tap/neovim", "--HEAD"] },
       ]);
+    });
+
+    it("passes configured timeout to brew source installs", async () => {
+      const observedTimeouts: Array<unknown> = [];
+
+      const shell: ShellService = {
+        run: (command) =>
+          command.startsWith("which ")
+            ? Effect.fail(
+                new ShellError({
+                  command,
+                  exitCode: 1,
+                  stderr: "not installed",
+                }),
+              )
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      };
+
+      const brew: BrewService = {
+        install: (_brew, options?) =>
+          Effect.sync(() => {
+            observedTimeouts.push(options?.timeout);
+          }),
+      };
+
+      const plan = await Effect.runPromise(topologicalSort([makeBrewItem("a", { timeout: 1234 })]));
+
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, brew),
+        Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+        ExecutorLive,
+      );
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(observedTimeouts).toEqual([1234]);
     });
 
     it("passes --cask when installing brew cask items", async () => {

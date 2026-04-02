@@ -1,6 +1,11 @@
 import { Context, Effect, Layer, Ref, Deferred } from "effect";
 import { FileSystem } from "@effect/platform";
-import type { SystemItem, GitInstall, BrewInstall } from "../schema/config.js";
+import type {
+  SystemItem,
+  GitInstall,
+  BrewInstall,
+  TimeoutInput as ItemTimeoutInput,
+} from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
 import { ShellService, type ShellResult } from "../services/ShellService.js";
 import { BackupService } from "../services/BackupService.js";
@@ -9,12 +14,20 @@ import { BrewService } from "../services/BrewService.js";
 import { ShellError, GitError, BrewError, BackupError } from "../errors.js";
 import { expandPath } from "../utils.js";
 
-export type ItemStatus = "installed" | "missing" | "error";
+export type ItemStatus = "installed" | "missing" | "error" | "blocked";
+export type ItemAction =
+  | "skipped"
+  | "installed"
+  | "updated"
+  | "would_update"
+  | "failed"
+  | "timed_out"
+  | "blocked";
 
 export interface ExecutionResult {
   readonly name: string;
   readonly status: ItemStatus;
-  readonly action: "skipped" | "installed" | "updated" | "would_update" | "failed";
+  readonly action: ItemAction;
   readonly backed_up?: string;
   readonly error?: string;
 }
@@ -136,20 +149,25 @@ const emitCommandOutput = (
   emitCommandStream(itemName, "stderr", result.stderr, options);
 };
 
+const toTimeoutOptions = (
+  timeout: ItemTimeoutInput | undefined,
+): { timeout: ItemTimeoutInput } | undefined => (timeout === undefined ? undefined : { timeout });
+
 const runShellCommand = (
   itemName: string,
   command: string,
   shell: ShellService,
+  timeout: SystemItem["timeout"],
   options: ExecutorOptions | undefined,
 ): Effect.Effect<ShellResult, ShellError> =>
   shell
-    .run(command)
+    .run(command, toTimeoutOptions(timeout))
     .pipe(Effect.tap((result) => Effect.sync(() => emitCommandOutput(itemName, result, options))));
 
 const checkItem = (
   item: SystemItem,
   shell: ShellService,
-): Effect.Effect<boolean, never, FileSystem.FileSystem> => {
+): Effect.Effect<boolean, ShellError, FileSystem.FileSystem> => {
   const checkMode = item.onCheck ?? "exit-code";
 
   if (checkMode === "path-exists") {
@@ -160,9 +178,9 @@ const checkItem = (
     });
   }
 
-  return shell.run(item.check).pipe(
+  return shell.run(item.check, toTimeoutOptions(item.timeout)).pipe(
     Effect.map(() => true),
-    Effect.catchAll(() => Effect.succeed(false)),
+    Effect.catchAll((error) => (error.timedOut ? Effect.fail(error) : Effect.succeed(false))),
   );
 };
 
@@ -174,14 +192,14 @@ const installItem = (
   options: ExecutorOptions | undefined,
 ): Effect.Effect<void, ShellError | GitError | BrewError, ShellService> => {
   if (isGitInstall(item.install)) {
-    return git.clone(item.install);
+    return git.clone(item.install, toTimeoutOptions(item.timeout));
   }
 
   if (isBrewInstall(item.install)) {
-    return brew.install(item.install);
+    return brew.install(item.install, toTimeoutOptions(item.timeout));
   }
 
-  return runShellCommand(item.name, item.install, shell, options).pipe(Effect.asVoid);
+  return runShellCommand(item.name, item.install, shell, item.timeout, options).pipe(Effect.asVoid);
 };
 
 const updateItem = (
@@ -193,7 +211,7 @@ const updateItem = (
   if (!item.update) {
     return Effect.void;
   }
-  return runShellCommand(item.name, item.update, shell, options).pipe(Effect.asVoid);
+  return runShellCommand(item.name, item.update, shell, item.timeout, options).pipe(Effect.asVoid);
 };
 
 type LockResult =
@@ -395,17 +413,52 @@ const formatReason = (reason: string, fallback: string): string => {
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
-const formatError = (error: ShellError | GitError | BrewError | BackupError): string => {
+type ExecutionError = ShellError | GitError | BrewError | BackupError;
+
+const isTimeoutError = (error: ExecutionError): boolean =>
+  ("timedOut" in error && error.timedOut === true) || false;
+
+const formatTimeoutSuffix = (timeoutMs: number | undefined): string =>
+  timeoutMs === undefined ? "" : ` after ${timeoutMs}ms`;
+
+const formatError = (error: ExecutionError): string => {
   switch (error._tag) {
     case "ShellError":
-      return `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}`;
+      return error.timedOut
+        ? `Command "${error.command}" timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.stderr, "No stderr output")}`
+        : `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}`;
     case "GitError":
-      return `Git error for ${error.repo}: ${formatReason(error.reason, "No reason provided")}`;
+      return error.timedOut
+        ? `Git operation for ${error.repo} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}`
+        : `Git error for ${error.repo}: ${formatReason(error.reason, "No reason provided")}`;
     case "BrewError":
-      return `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}`;
+      return error.timedOut
+        ? `Brew operation for ${error.formula_or_cask} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}`
+        : `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}`;
     case "BackupError":
       return `Backup error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
   }
+};
+
+const makeExecutionFailureResult = (
+  item: SystemItem,
+  error: ExecutionError,
+  options: ExecutorOptions | undefined,
+): ExecutionResult => {
+  const result: ExecutionResult = {
+    name: item.name,
+    status: "error",
+    action: isTimeoutError(error) ? "timed_out" : "failed",
+    error: formatError(error),
+  };
+
+  options?.onProgress?.(result);
+  emitVerbose(
+    options,
+    `[${item.name}] ${result.action === "timed_out" ? "timeout" : "failure"}: ${result.error ?? "Unknown failure"}`,
+  );
+
+  return result;
 };
 
 const executeLevel = (
@@ -421,21 +474,41 @@ const executeLevel = (
     items,
     (item) =>
       executeItem(item, options, groupLocks).pipe(
-        // Catch errors per-item and convert to ExecutionResult with error
-        Effect.catchAll((error) => {
-          const result: ExecutionResult = {
-            name: item.name,
-            status: "error",
-            action: "failed",
-            error: formatError(error),
-          };
-          options?.onProgress?.(result);
-          emitVerbose(options, `[${item.name}] failure: ${result.error ?? "Unknown failure"}`);
-          return Effect.succeed(result);
-        }),
+        Effect.catchAll((error) =>
+          Effect.succeed(makeExecutionFailureResult(item, error, options)),
+        ),
       ),
     { concurrency: "unbounded" },
   );
+
+const isBlockingAction = (action: ItemAction): boolean =>
+  action === "failed" || action === "timed_out" || action === "blocked";
+
+const getBlockingDependencies = (
+  item: SystemItem,
+  invalidatedItems: ReadonlySet<string>,
+): readonly string[] =>
+  (item.dependsOn ?? []).filter((dependency) => invalidatedItems.has(dependency));
+
+const formatBlockedReason = (blockedBy: readonly string[]): string =>
+  blockedBy.length === 1
+    ? `Blocked by unsuccessful dependency: ${blockedBy[0]}`
+    : `Blocked by unsuccessful dependencies: ${blockedBy.join(", ")}`;
+
+const makeBlockedResult = (item: SystemItem, blockedBy: readonly string[]): ExecutionResult => ({
+  name: item.name,
+  status: "blocked",
+  action: "blocked",
+  error: formatBlockedReason(blockedBy),
+});
+
+const orderLevelResults = (
+  level: readonly SystemItem[],
+  levelResults: readonly ExecutionResult[],
+): readonly ExecutionResult[] => {
+  const byName = new Map(levelResults.map((result) => [result.name, result]));
+  return level.map((item) => byName.get(item.name)!);
+};
 
 export const ExecutorLive = Layer.succeed(
   Executor,
@@ -443,16 +516,40 @@ export const ExecutorLive = Layer.succeed(
     execute: (plan, options) =>
       Effect.gen(function* () {
         const groupLocks = yield* Ref.make(new Map<string, Deferred.Deferred<void>>());
+        const invalidatedItems = new Set<string>();
         const results: ExecutionResult[] = [];
 
         for (const level of plan.levels) {
-          const levelResults = yield* executeLevel(level, options, groupLocks);
-          results.push(...levelResults);
+          const blockedResults: ExecutionResult[] = [];
+          const runnableItems: SystemItem[] = [];
 
-          const failed = levelResults.find((r) => r.action === "failed");
-          if (failed) {
-            break;
+          for (const item of level) {
+            const blockedBy = getBlockingDependencies(item, invalidatedItems);
+            if (blockedBy.length > 0) {
+              blockedResults.push(makeBlockedResult(item, blockedBy));
+            } else {
+              runnableItems.push(item);
+            }
           }
+
+          for (const result of blockedResults) {
+            options?.onProgress?.(result);
+            emitVerbose(
+              options,
+              `[${result.name}] blocked: ${result.error ?? "Dependency failure"}`,
+            );
+            invalidatedItems.add(result.name);
+          }
+
+          const executedResults = yield* executeLevel(runnableItems, options, groupLocks);
+
+          for (const result of executedResults) {
+            if (isBlockingAction(result.action)) {
+              invalidatedItems.add(result.name);
+            }
+          }
+
+          results.push(...orderLevelResults(level, [...blockedResults, ...executedResults]));
         }
 
         return results;
