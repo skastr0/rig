@@ -84,6 +84,7 @@ Configuration is a JSON file (default: `./system-config.json`).
 | `update` | No | Command to update the item |
 | `group` | No | Serial execution group (items in same group run sequentially) |
 | `dependsOn` | No | Array of item names that must be installed first |
+| `timeout` | No | Per-item timeout in milliseconds for checks, installs, and updates |
 | `backup` | No | Path to backup before installing |
 | `tags` | No | Array of tags for filtering |
 
@@ -164,6 +165,21 @@ Here, neovim and ripgrep run sequentially (same group), while nodejs runs in par
   ]
 }
 ```
+
+If a dependency fails or times out, only its downstream dependents are blocked. Unrelated items continue to run.
+
+### Timeouts
+
+```json
+{
+  "name": "xcode-tools",
+  "check": "xcode-select -p",
+  "install": "xcode-select --install",
+  "timeout": 1800000
+}
+```
+
+Timeouts are specified in milliseconds and apply to check, install, and update commands for that item.
 
 ### Profiles
 
@@ -267,7 +283,7 @@ system-setup --tags dev
 2. **Resolve**: Apply profile (exclude items, add profile-specific items)
 3. **Plan**: Build dependency graph, topological sort
 4. **Detect**: Run check commands to determine current state
-5. **Execute**: Install missing items with group-based concurrency
+5. **Execute**: Install missing items with group-based concurrency and dependency-isolated failure handling
 6. **Report**: Show summary of actions taken
 
 ## Development
