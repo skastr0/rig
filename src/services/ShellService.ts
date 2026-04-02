@@ -24,13 +24,23 @@ export interface ShellService {
 
 export const ShellService = Context.GenericTag<ShellService>("ShellService");
 
+const DEFAULT_TIMEOUT_MS = Duration.toMillis("10 minutes");
+
+const formatTimeoutMessage = (timeoutMs: number, stderr: string): string => {
+  const details = stderr.trim();
+  return details.length > 0
+    ? `Timed out after ${timeoutMs}ms: ${details}`
+    : `Timed out after ${timeoutMs}ms`;
+};
+
 const spawnProcess = (
   args: readonly string[],
   options?: { timeout?: Duration.DurationInput; cwd?: string },
 ): Effect.Effect<ShellResult, ShellError> =>
   Effect.tryPromise({
     try: async () => {
-      const timeout = options?.timeout ? Duration.toMillis(options.timeout) : 600_000;
+      const timeoutMs = options?.timeout ? Duration.toMillis(options.timeout) : DEFAULT_TIMEOUT_MS;
+      let timedOut = false;
 
       const proc = Bun.spawn(args as string[], {
         stdout: "pipe",
@@ -39,20 +49,18 @@ const spawnProcess = (
       });
 
       const timeoutId = setTimeout(() => {
+        timedOut = true;
         proc.kill();
-      }, timeout);
+      }, timeoutMs);
 
       try {
         const exitCode = await proc.exited;
-        clearTimeout(timeoutId);
-
         const stdout = await new Response(proc.stdout).text();
         const stderr = await new Response(proc.stderr).text();
 
-        return { stdout, stderr, exitCode };
-      } catch {
+        return { stdout, stderr, exitCode, timedOut, timeoutMs };
+      } finally {
         clearTimeout(timeoutId);
-        throw new Error("Process failed");
       }
     },
     catch: () =>
@@ -63,15 +71,29 @@ const spawnProcess = (
       }),
   }).pipe(
     Effect.flatMap((result) =>
-      result.exitCode !== 0
+      result.timedOut
         ? Effect.fail(
             new ShellError({
               command: args.join(" "),
-              exitCode: result.exitCode,
-              stderr: result.stderr,
+              exitCode: -1,
+              stderr: formatTimeoutMessage(result.timeoutMs, result.stderr),
+              timedOut: true,
+              timeoutMs: result.timeoutMs,
             }),
           )
-        : Effect.succeed(result),
+        : result.exitCode !== 0
+          ? Effect.fail(
+              new ShellError({
+                command: args.join(" "),
+                exitCode: result.exitCode,
+                stderr: result.stderr,
+              }),
+            )
+          : Effect.succeed({
+              stdout: result.stdout,
+              stderr: result.stderr,
+              exitCode: result.exitCode,
+            }),
     ),
   );
 

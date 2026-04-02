@@ -1,59 +1,68 @@
 import { Context, Effect, Layer } from "effect";
 import { BrewError } from "../errors.js";
 import { ShellService } from "./ShellService.js";
-import type { BrewInstall } from "../schema/config.js";
+import type { BrewInstall, TimeoutInput } from "../schema/config.js";
 
 export interface BrewService {
-  readonly install: (brew: BrewInstall) => Effect.Effect<void, BrewError, ShellService>;
+  readonly install: (
+    brew: BrewInstall,
+    options?: { timeout?: TimeoutInput },
+  ) => Effect.Effect<void, BrewError, ShellService>;
 }
 
 export const BrewService = Context.GenericTag<BrewService>("BrewService");
 
+const mapBrewShellError = (
+  formulaOrCask: string,
+  reason: string,
+  error: { readonly timedOut?: boolean; readonly timeoutMs?: number },
+): BrewError =>
+  new BrewError({
+    formula_or_cask: formulaOrCask,
+    reason,
+    ...(error.timedOut === undefined ? {} : { timedOut: error.timedOut }),
+    ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
+  });
+
 export const BrewServiceLive = Layer.succeed(
   BrewService,
   BrewService.of({
-    install: (brew) =>
+    install: (brew, options) =>
       Effect.gen(function* () {
         const shell = yield* ShellService;
         const formulaOrCask = brew.formula ?? brew.cask ?? "unknown";
 
         if (brew.tap) {
-          yield* shell.exec("brew", ["tap", brew.tap]).pipe(
-            Effect.mapError(
-              (error) =>
-                new BrewError({
-                  formula_or_cask: formulaOrCask,
-                  reason: `Failed to tap ${brew.tap} (exit ${error.exitCode}): ${error.stderr}`,
-                }),
-            ),
-          );
+          yield* shell
+            .exec("brew", ["tap", brew.tap], options)
+            .pipe(
+              Effect.mapError((error) =>
+                mapBrewShellError(formulaOrCask, `Failed to tap ${brew.tap}`, error),
+              ),
+            );
         }
 
         if (brew.formula) {
           const formula = brew.formula;
-          yield* shell.exec("brew", ["install", formula, ...(brew.args ?? [])]).pipe(
-            Effect.mapError(
-              (error) =>
-                new BrewError({
-                  formula_or_cask: formula,
-                  reason: `Failed to install formula ${formula} (exit ${error.exitCode}): ${error.stderr}`,
-                }),
-            ),
-          );
+          yield* shell
+            .exec("brew", ["install", formula, ...(brew.args ?? [])], options)
+            .pipe(
+              Effect.mapError((error) =>
+                mapBrewShellError(formula, `Failed to install formula ${formula}`, error),
+              ),
+            );
           return;
         }
 
         if (brew.cask) {
           const cask = brew.cask;
-          yield* shell.exec("brew", ["install", "--cask", cask, ...(brew.args ?? [])]).pipe(
-            Effect.mapError(
-              (error) =>
-                new BrewError({
-                  formula_or_cask: cask,
-                  reason: `Failed to install cask ${cask} (exit ${error.exitCode}): ${error.stderr}`,
-                }),
-            ),
-          );
+          yield* shell
+            .exec("brew", ["install", "--cask", cask, ...(brew.args ?? [])], options)
+            .pipe(
+              Effect.mapError((error) =>
+                mapBrewShellError(cask, `Failed to install cask ${cask}`, error),
+              ),
+            );
           return;
         }
 
