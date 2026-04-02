@@ -93,6 +93,16 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
           actionText = "would install";
         }
         break;
+      case "timed_out":
+        statusIcon = symbols.cross;
+        statusColor = c.red;
+        actionText = "timed out";
+        break;
+      case "blocked":
+        statusIcon = symbols.dot;
+        statusColor = c.yellow;
+        actionText = "blocked by dependency";
+        break;
       case "failed":
         statusIcon = symbols.cross;
         statusColor = c.red;
@@ -106,13 +116,17 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
       `  ${statusColor}${statusIcon}${c.reset} ${name} ${c.dim}${symbols.arrow}${c.reset} ${actionText}${backupInfo}`,
     );
 
-    if (action === "failed") {
-      console.log(`    ${c.red}${symbols.arrow}${c.reset} Reason: ${formatFailureReason(error)}`);
+    if (action === "failed" || action === "timed_out" || action === "blocked") {
+      console.log(
+        `    ${statusColor}${symbols.arrow}${c.reset} Reason: ${formatFailureReason(error)}`,
+      );
     }
   };
 
   const printSummary = (results: readonly ExecutionResult[]) => {
     const failedResults = results.filter((r) => r.action === "failed");
+    const timedOutResults = results.filter((r) => r.action === "timed_out");
+    const blockedResults = results.filter((r) => r.action === "blocked");
     const installed = results.filter((r) => r.action === "installed").length;
     const updated = results.filter((r) => r.action === "updated").length;
     const wouldUpdate = results.filter((r) => r.action === "would_update").length;
@@ -123,6 +137,8 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
       (r) => r.action === "skipped" && r.status === "missing",
     ).length;
     const failed = failedResults.length;
+    const timedOut = timedOutResults.length;
+    const blocked = blockedResults.length;
     const backedUp = results.filter((r) => r.backed_up).length;
 
     console.log(`\n${c.bold}Summary:${c.reset}`);
@@ -142,11 +158,27 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     if (wouldInstall > 0) {
       console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${wouldInstall} would be installed`);
     }
+    if (timedOut > 0) {
+      console.log(`  ${c.red}${symbols.cross}${c.reset} ${timedOut} timed out`);
+      timedOutResults.forEach((result) => {
+        console.log(
+          `    ${c.red}${symbols.arrow}${c.reset} ${result.name}: ${formatFailureReason(result.error)}`,
+        );
+      });
+    }
     if (failed > 0) {
       console.log(`  ${c.red}${symbols.cross}${c.reset} ${failed} failed`);
       failedResults.forEach((result) => {
         console.log(
           `    ${c.red}${symbols.arrow}${c.reset} ${result.name}: ${formatFailureReason(result.error)}`,
+        );
+      });
+    }
+    if (blocked > 0) {
+      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${blocked} blocked by dependencies`);
+      blockedResults.forEach((result) => {
+        console.log(
+          `    ${c.yellow}${symbols.arrow}${c.reset} ${result.name}: ${formatFailureReason(result.error)}`,
         );
       });
     }

@@ -139,6 +139,34 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("Reason:"))).toBe(true);
       expect(output.some((line) => line.includes("network unavailable"))).toBe(true);
     });
+
+    it("should print timed out status", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "error",
+        action: "timed_out",
+        error: 'Command "brew install test" timed out after 5000ms: Timed out after 5000ms',
+      });
+
+      expect(output.some((line) => line.includes("timed out"))).toBe(true);
+      expect(output.some((line) => line.includes("Reason:"))).toBe(true);
+    });
+
+    it("should print blocked status", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "blocked",
+        action: "blocked",
+        error: "Blocked by unsuccessful dependency: homebrew",
+      });
+
+      expect(output.some((line) => line.includes("blocked by dependency"))).toBe(true);
+      expect(output.some((line) => line.includes("homebrew"))).toBe(true);
+    });
   });
 
   describe("printSummary", () => {
@@ -204,6 +232,32 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("1 failed"))).toBe(true);
       expect(output.some((line) => line.includes("claude-code:"))).toBe(true);
       expect(output.some((line) => line.includes("network unavailable"))).toBe(true);
+    });
+
+    it("should print timed out and blocked counts", () => {
+      const reporter = createReporter({ noColor: true });
+
+      const results: ExecutionResult[] = [
+        {
+          name: "homebrew",
+          status: "error",
+          action: "timed_out",
+          error: 'Command "brew install homebrew" timed out after 5000ms: Timed out after 5000ms',
+        },
+        {
+          name: "neovim",
+          status: "blocked",
+          action: "blocked",
+          error: "Blocked by unsuccessful dependency: homebrew",
+        },
+      ];
+
+      reporter.printSummary(results);
+
+      expect(output.some((line) => line.includes("1 timed out"))).toBe(true);
+      expect(output.some((line) => line.includes("1 blocked by dependencies"))).toBe(true);
+      expect(output.some((line) => line.includes("homebrew:"))).toBe(true);
+      expect(output.some((line) => line.includes("neovim:"))).toBe(true);
     });
   });
 
