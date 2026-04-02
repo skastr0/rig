@@ -9,16 +9,22 @@ export class ShellError extends Data.TaggedError("ShellError")<{
   readonly command: string;
   readonly exitCode: number;
   readonly stderr: string;
+  readonly timedOut?: boolean;
+  readonly timeoutMs?: number;
 }> {}
 
 export class GitError extends Data.TaggedError("GitError")<{
   readonly repo: string;
   readonly reason: string;
+  readonly timedOut?: boolean;
+  readonly timeoutMs?: number;
 }> {}
 
 export class BrewError extends Data.TaggedError("BrewError")<{
   readonly formula_or_cask: string;
   readonly reason: string;
+  readonly timedOut?: boolean;
+  readonly timeoutMs?: number;
 }> {}
 
 export class ValidationError extends Data.TaggedError("ValidationError")<{
