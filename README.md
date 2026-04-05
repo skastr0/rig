@@ -17,8 +17,10 @@ cat > system-config.json << 'EOF'
     {
       "name": "neovim",
       "check": "which nvim",
-      "install": "brew install neovim",
-      "group": "brew"
+      "install": {
+        "source": "brew",
+        "formula": "neovim"
+      }
     }
   ]
 }
@@ -27,8 +29,26 @@ EOF
 # Preview what would be installed
 system-setup --dry-run
 
-# Apply configuration
+# Apply local configuration
 system-setup
+
+# Review a remote configuration first (default for HTTPS sources)
+system-setup https://example.com/system-config.json
+
+# Review a GitHub-hosted configuration first
+system-setup gh:user/repo
+
+# Review a pinned GitHub configuration
+system-setup gh:user/repo@0123456789abcdef0123456789abcdef01234567
+
+# Review a remote config with recorded integrity
+system-setup 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+# Apply a reviewed remote configuration
+system-setup --apply https://example.com/system-config.json
+
+# Apply a reviewed GitHub shorthand configuration
+system-setup --apply gh:user/repo
 ```
 
 ## Installation
@@ -57,7 +77,78 @@ chmod +x ~/.local/bin/system-setup
 
 ## Configuration
 
-Configuration is a JSON file (default: `./system-config.json`).
+Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand. If you do not provide a source, `system-setup` defaults to `./system-config.json`. Remote sources must use HTTPS, whether you pass the final URL directly or let GitHub shorthand resolve it for you.
+
+### GitHub shorthand
+
+`system-setup` supports a narrow GitHub shorthand that resolves into the existing remote HTTPS loader:
+
+- `gh:owner/repo`
+- `gh:owner/repo/path/to/config.json`
+- `gh:owner/repo@<40-char-commit>`
+- `gh:owner/repo@<40-char-commit>/path/to/config.json`
+
+Resolution is deterministic:
+
+- bare `gh:owner/repo` resolves to `https://raw.githubusercontent.com/owner/repo/HEAD/system-config.json`
+- `gh:owner/repo/path/to/config.json` resolves to `https://raw.githubusercontent.com/owner/repo/HEAD/path/to/config.json`
+- `gh:owner/repo@<40-char-commit>` resolves to `https://raw.githubusercontent.com/owner/repo/<40-char-commit>/system-config.json`
+- pinned refs must be full 40-character Git commit SHAs
+- preview output shows the canonical resolved HTTPS URL so you can review exactly what will be fetched
+
+This shorthand is intentionally narrow:
+
+- no mutable branch or tag shorthand such as `@main` or `@v1`
+- no query strings
+- no arbitrary fragments beyond `#sha256=<64 hex characters>`
+- no private repository auth flows
+- no non-GitHub providers
+
+If you need a specific branch or tag, pass the full HTTPS raw URL explicitly. If you want stable repeated runs, prefer a pinned commit SHA.
+
+### Pinning and integrity
+
+Remote config pinning stays intentionally small:
+
+- GitHub shorthand can pin to an immutable commit with `@<40-char-commit>`
+- any remote HTTPS source can record an optional integrity check with `#sha256=<64 hex characters>`
+- the integrity fragment is stripped before fetching, so it acts as local verification metadata rather than part of the remote request
+
+That gives one narrow operator story for audited repeated runs:
+
+```bash
+# Pin GitHub shorthand to a specific commit
+system-setup gh:owner/repo@0123456789abcdef0123456789abcdef01234567
+
+# Add integrity verification to any remote source
+system-setup 'gh:owner/repo@0123456789abcdef0123456789abcdef01234567#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+system-setup 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+```
+
+Integrity mismatches fail closed and report both the expected and observed SHA-256 digests.
+
+### Remote config trust model
+
+Local configs keep the existing contract: apply by default, preview with `--dry-run`.
+
+Remote configs are review-first:
+- `system-setup https://example.com/system-config.json` loads the remote config in a non-mutating preview mode
+- `system-setup gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
+- preview output shows the source, the selected items, and the install or update steps that would run
+- preview output also echoes any active GitHub commit pin or SHA-256 integrity check
+- preview output makes shell install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, and `symlink`
+- `system-setup --apply https://example.com/system-config.json` is the explicit opt-in to execute a remote config
+- `system-setup --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
+
+```bash
+# Review first
+system-setup https://example.com/system-config.json
+system-setup gh:owner/repo
+
+# Then apply once you trust it
+system-setup --apply https://example.com/system-config.json
+system-setup --apply gh:owner/repo/path/to/config.json
+```
 
 ### Basic Structure
 
@@ -65,9 +156,13 @@ Configuration is a JSON file (default: `./system-config.json`).
 {
   "items": [
     {
-      "name": "neovim",
-      "check": "which nvim",
-      "install": "brew install neovim"
+      "name": "config-root",
+      "check": "~/.config",
+      "onCheck": "path-exists",
+      "install": {
+        "source": "dir",
+        "path": "~/.config"
+      }
     }
   ]
 }
@@ -79,9 +174,9 @@ Configuration is a JSON file (default: `./system-config.json`).
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier for the item |
 | `check` | Yes | Command or path to verify installation |
-| `install` | Yes | Shell command or git config to install |
+| `install` | Yes | Shell command or structured install source |
 | `onCheck` | No | Detection strategy: `"exit-code"` (default) or `"path-exists"` |
-| `update` | No | Command to update the item |
+| `update` | No | Command to update the item; `symlink` sources also use `--update` to replace incorrect existing paths |
 | `group` | No | Serial execution group (items in same group run sequentially) |
 | `dependsOn` | No | Array of item names that must be installed first |
 | `timeout` | No | Per-item timeout in milliseconds for checks, installs, and updates |
@@ -102,10 +197,35 @@ Configuration is a JSON file (default: `./system-config.json`).
 
 ### Install Strategies
 
-**Shell command**:
+**Directory (preferred for managed directories)**:
 ```json
-{ "install": "brew install neovim" }
+{
+  "name": "projects-root",
+  "check": "~/Projects",
+  "onCheck": "path-exists",
+  "install": {
+    "source": "dir",
+    "path": "~/Projects"
+  }
+}
 ```
+
+**Symlink (preferred for managed links)**:
+```json
+{
+  "name": "zshrc",
+  "check": "~/.zshrc",
+  "onCheck": "path-exists",
+  "install": {
+    "source": "symlink",
+    "path": "~/.zshrc",
+    "target": "~/.dotfiles/.zshrc"
+  },
+  "backup": "~/.zshrc"
+}
+```
+
+For `symlink` items, `--update` means: if `install.path` already exists but is not the desired symlink, system-setup replaces that existing path with the configured symlink. If `backup` is set, that path is backed up before replacement.
 
 **Brew source (preferred for Homebrew)**:
 ```json
@@ -137,6 +257,11 @@ Configuration is a JSON file (default: `./system-config.json`).
     "sparse": ["nvim", "zsh"]
   }
 }
+```
+
+**Shell command (escape hatch)**:
+```json
+{ "install": "brew install neovim" }
 ```
 
 ### Groups (Serial Execution)
@@ -245,14 +370,16 @@ system-setup --tags dev --tags editor  # Items with "dev" OR "editor"
 ## CLI Options
 
 ```
-system-setup [options]
+system-setup [options] [config-source]
 
 Options:
-  -c, --config <path>   Path to configuration file (default: ./system-config.json)
+  -c, --config <source> Path to a local config file or HTTPS config URL (default: ./system-config.json)
   -p, --profile <name>  Profile to apply
   -d, --dry-run         Show what would be installed without making changes
+  --apply               Execute an HTTPS config source after review (remote configs preview by default)
   -t, --tags <tag>      Filter items by tags (can be repeated)
   -o, --only <name>     Install only specific items by name (can be repeated)
+  -u, --update          Run update commands and reconcile managed symlinks
   -v, --verbose         Show detailed output
   --help                Show help
   --version             Show version
@@ -261,11 +388,20 @@ Options:
 ### Examples
 
 ```bash
-# Use custom config
-system-setup -c ~/my-config.json
+# Use a custom local config
+system-setup ~/my-config.json
 
-# Preview changes
-system-setup --dry-run
+# Use an explicit config flag
+system-setup --config ~/my-config.json
+
+# Review a remote config first
+system-setup https://example.com/system-config.json
+
+# Apply a remote config after review
+system-setup --apply https://example.com/system-config.json
+
+# Force preview for a remote config explicitly
+system-setup --dry-run https://example.com/system-config.json
 
 # Apply work profile
 system-setup --profile work
@@ -279,7 +415,7 @@ system-setup --tags dev
 
 ## How It Works
 
-1. **Load**: Read and validate JSON configuration
+1. **Load**: Read and validate the JSON configuration source
 2. **Resolve**: Apply profile (exclude items, add profile-specific items)
 3. **Plan**: Build dependency graph, topological sort
 4. **Detect**: Run check commands to determine current state

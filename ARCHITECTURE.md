@@ -16,7 +16,7 @@ A declarative, idempotent macOS system configuration tool built with Effect and 
 
 **Context**: Initial design used discriminated unions with types like `brew-package`, `asdf-plugin`, etc., each with dedicated handlers.
 
-**Decision**: Use a single generic `SystemItem` schema where users define their own `check`, `install`, and `update` commands.
+**Decision**: Use a single generic `SystemItem` schema where users define their own `check`, optional `update`, and either a shell install command or a small set of structured install sources.
 
 **Rationale**:
 - Removes coupling to specific package managers
@@ -30,7 +30,7 @@ type SystemItem = {
   name: string              // Unique identifier
   check: string             // Command or path to verify installation
   onCheck?: "exit-code" | "path-exists"  // Detection strategy
-  install: string | GitInstall  // Command or git clone config
+  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall
   update?: string           // Optional update command
   group?: string            // Serial execution group
   dependsOn?: string[]      // Dependency ordering
@@ -40,17 +40,21 @@ type SystemItem = {
 
 ### ADR-002: Install Strategy Discriminated Union
 
-**Context**: Most items install via shell command, but git repos need structured handling (clone, sparse checkout, branch).
+**Context**: Most items install via shell command, but a few high-frequency cases need structured handling for clarity and safer defaults.
 
-**Decision**: `install` field is a union of `string` (shell command) or `{ source: "git", repo, path, branch?, sparse? }`.
+**Decision**: `install` is a union of:
+- `string` for shell commands (escape hatch)
+- `{ source: "brew", ... }` for Homebrew installs
+- `{ source: "git", ... }` for clones and sparse checkouts
+- `{ source: "dir", path }` for directory creation
+- `{ source: "symlink", path, target }` for managed symlinks
 
 **Rationale**:
-- Shell commands cover 90% of cases
-- Git clones need structured handling for:
-  - Sparse checkout (single folder from dotfiles repo)
-  - Branch selection
-  - Path expansion
-- Keeps schema simple while handling the important special case
+- Shell commands still cover edge cases
+- Brew installs need safe serialization and clearer config
+- Git clones need structured handling for sparse checkout, branch selection, and path expansion
+- Directory and symlink items encode simple filesystem intent directly instead of wrapping shell commands
+- Keeps the schema small while making the common cases explicit
 
 ### ADR-003: Group-Based Serial Execution
 
@@ -81,6 +85,8 @@ type SystemItem = {
 **Decision**: Each item has a `check` field. Based on `onCheck`:
 - `exit-code` (default): Run command; exit 0 = installed
 - `path-exists`: Check if path exists
+
+Structured `dir` and `symlink` install sources also perform install-specific filesystem checks so they can detect conflicts and symlink drift explicitly.
 
 **Rationale**:
 - User controls detection logic
