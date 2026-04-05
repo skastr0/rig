@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Layer } from "effect";
 import { FileSystem } from "@effect/platform";
+import * as Path from "node:path";
 import { Executor, ExecutorLive, type ExecutionResult } from "./Executor.js";
 import { topologicalSort } from "./Planner.js";
 import { ShellService } from "../services/ShellService.js";
@@ -9,6 +10,7 @@ import { GitService } from "../services/GitService.js";
 import { BrewService, BrewServiceLive } from "../services/BrewService.js";
 import type { SystemItem } from "../schema/config.js";
 import { ShellError } from "../errors.js";
+import { expandPath } from "../utils.js";
 
 const makeItem = (
   name: string,
@@ -63,6 +65,177 @@ const makeBrewItem = (
   group: opts?.group,
   timeout: opts?.timeout,
 });
+
+const makeDirItem = (name: string, path: string): SystemItem => ({
+  name,
+  check: path,
+  onCheck: "path-exists",
+  install: {
+    source: "dir",
+    path,
+  },
+});
+
+const makeSymlinkItem = (
+  name: string,
+  path: string,
+  target: string,
+  opts?: {
+    backup?: string;
+  },
+): SystemItem => ({
+  name,
+  check: path,
+  onCheck: "path-exists",
+  install: {
+    source: "symlink",
+    path,
+    target,
+  },
+  backup: opts?.backup,
+});
+
+type MockFsNode =
+  | { type: "Directory" }
+  | { type: "File" }
+  | { type: "SymbolicLink"; target: string };
+
+const normalizeTestPath = (path: string): string => Path.normalize(Path.resolve(expandPath(path)));
+
+const createMockFileSystem = (
+  entries: Record<string, MockFsNode> = {},
+): FileSystem.FileSystem & {
+  readonly entries: Map<string, MockFsNode>;
+} => {
+  const state = new Map<string, MockFsNode>();
+
+  const ensureParentDirectories = (path: string): void => {
+    const parentPath = Path.dirname(path);
+
+    if (parentPath === path) {
+      return;
+    }
+
+    ensureParentDirectories(parentPath);
+
+    const existingParent = state.get(parentPath);
+    if (existingParent && existingParent.type !== "Directory") {
+      throw new Error(`Parent path exists as ${existingParent.type}: ${parentPath}`);
+    }
+
+    if (!existingParent) {
+      state.set(parentPath, { type: "Directory" });
+    }
+  };
+
+  const setEntry = (path: string, entry: MockFsNode): void => {
+    const normalizedPath = normalizeTestPath(path);
+    ensureParentDirectories(normalizedPath);
+    state.set(normalizedPath, entry);
+  };
+
+  for (const [path, entry] of Object.entries(entries)) {
+    setEntry(path, entry);
+  }
+
+  const fileSystem = {
+    entries: state,
+    exists: (path: string) => Effect.succeed(state.has(normalizeTestPath(path))),
+    stat: (path: string) =>
+      Effect.gen(function* () {
+        const entry = state.get(normalizeTestPath(path));
+        if (!entry) {
+          return yield* Effect.fail(new Error(`Path not found: ${path}`));
+        }
+
+        return { type: entry.type };
+      }),
+    makeDirectory: (path: string, options?: { recursive?: boolean }) =>
+      Effect.sync(() => {
+        const normalizedPath = normalizeTestPath(path);
+
+        if (options?.recursive) {
+          ensureParentDirectories(normalizedPath);
+        } else {
+          const parentPath = Path.dirname(normalizedPath);
+          if (parentPath !== normalizedPath) {
+            const parent = state.get(parentPath);
+            if (!parent || parent.type !== "Directory") {
+              throw new Error(`Parent directory missing: ${parentPath}`);
+            }
+          }
+        }
+
+        const existing = state.get(normalizedPath);
+        if (existing && existing.type !== "Directory") {
+          throw new Error(`Path exists as ${existing.type}: ${normalizedPath}`);
+        }
+
+        state.set(normalizedPath, { type: "Directory" });
+      }),
+    symlink: (target: string, path: string) =>
+      Effect.sync(() => {
+        const normalizedPath = normalizeTestPath(path);
+        const parentPath = Path.dirname(normalizedPath);
+        const parent = state.get(parentPath);
+
+        if (parentPath !== normalizedPath && (!parent || parent.type !== "Directory")) {
+          throw new Error(`Parent directory missing: ${parentPath}`);
+        }
+
+        if (state.has(normalizedPath)) {
+          throw new Error(`Path already exists: ${normalizedPath}`);
+        }
+
+        state.set(normalizedPath, { type: "SymbolicLink", target });
+      }),
+    readLink: (path: string) =>
+      Effect.gen(function* () {
+        const entry = state.get(normalizeTestPath(path));
+        if (!entry || entry.type !== "SymbolicLink") {
+          return yield* Effect.fail(new Error(`Path is not a symlink: ${path}`));
+        }
+
+        return entry.target;
+      }),
+    remove: (path: string, options?: { recursive?: boolean }) =>
+      Effect.sync(() => {
+        const normalizedPath = normalizeTestPath(path);
+        const entry = state.get(normalizedPath);
+
+        if (!entry) {
+          return;
+        }
+
+        if (entry.type === "Directory") {
+          const prefix = `${normalizedPath}${Path.sep}`;
+          const hasChildren = [...state.keys()].some(
+            (candidate) => candidate !== normalizedPath && candidate.startsWith(prefix),
+          );
+
+          if (hasChildren && !options?.recursive) {
+            throw new Error(`Directory not empty: ${normalizedPath}`);
+          }
+
+          const candidates = Array.from(state.keys());
+
+          for (const candidate of candidates) {
+            if (candidate === normalizedPath || candidate.startsWith(prefix)) {
+              state.delete(candidate);
+            }
+          }
+
+          return;
+        }
+
+        state.delete(normalizedPath);
+      }),
+  };
+
+  return fileSystem as unknown as FileSystem.FileSystem & {
+    readonly entries: Map<string, MockFsNode>;
+  };
+};
 
 const mockShellService = (installedItems: Set<string>): ShellService => ({
   run: (command, _options?) =>
@@ -129,17 +302,18 @@ const mockBrewService: BrewService = {
   install: (_brew, _options?) => Effect.void as any,
 };
 
-const mockFileSystem = {
-  exists: () => Effect.succeed(false),
-} as unknown as FileSystem.FileSystem;
+const mockFileSystem = createMockFileSystem();
 
-const createTestLayer = (installedItems: Set<string>) =>
+const createTestLayer = (
+  installedItems: Set<string>,
+  fileSystem: FileSystem.FileSystem = mockFileSystem,
+) =>
   Layer.mergeAll(
     Layer.succeed(ShellService, mockShellService(installedItems)),
     Layer.succeed(BackupService, mockBackupService),
     Layer.succeed(GitService, mockGitService),
     Layer.succeed(BrewService, mockBrewService),
-    Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+    Layer.succeed(FileSystem.FileSystem, fileSystem),
     ExecutorLive,
   );
 
@@ -192,6 +366,10 @@ describe("Executor", () => {
     expect(results).toHaveLength(1);
     expect(results[0].action).toBe("skipped");
     expect(results[0].status).toBe("missing");
+    expect(results[0].preview).toEqual({
+      label: "shell install command",
+      steps: ["brew install a"],
+    });
     expect(installed.has("a")).toBe(false);
   });
 
@@ -499,6 +677,287 @@ describe("Executor", () => {
     );
 
     expect(observedTimeouts).toEqual([5_000, 5_000]);
+  });
+
+  describe("dir install strategy", () => {
+    it("creates missing directories", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([makeDirItem("projects-root", "~/Projects")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "projects-root",
+          action: "installed",
+          status: "installed",
+        }),
+      ]);
+      expect(fileSystem.entries.get(normalizeTestPath("~/Projects"))).toEqual({
+        type: "Directory",
+      });
+    });
+
+    it("skips when the directory already exists", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/Projects": { type: "Directory" },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeDirItem("projects-root", "~/Projects")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "projects-root",
+          action: "skipped",
+          status: "installed",
+        }),
+      ]);
+    });
+
+    it("emits clear dry-run output for directory creation", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([makeDirItem("projects-root", "~/Projects")]),
+      );
+      const verboseMessages: string[] = [];
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            dryRun: true,
+            verbose: true,
+            onVerbose: (message) => verboseMessages.push(message),
+          });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "projects-root",
+          action: "skipped",
+          status: "missing",
+        }),
+      ]);
+      expect(verboseMessages).toContain(
+        `[projects-root] would install: create directory ${normalizeTestPath("~/Projects")}`,
+      );
+      expect(fileSystem.entries.has(normalizeTestPath("~/Projects"))).toBe(false);
+    });
+
+    it("fails with an actionable error when the directory path is occupied", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/Projects": { type: "File" },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeDirItem("projects-root", "~/Projects")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "projects-root",
+          action: "failed",
+          status: "error",
+        }),
+      );
+      expect(results[0].error).toContain("Expected directory");
+      expect(results[0].error).toContain("found file");
+    });
+  });
+
+  describe("symlink install strategy", () => {
+    it("creates missing symlinks", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "zshrc",
+          action: "installed",
+          status: "installed",
+        }),
+      ]);
+      expect(fileSystem.entries.get(normalizeTestPath("~/.zshrc"))).toEqual({
+        type: "SymbolicLink",
+        target: normalizeTestPath("~/.dotfiles/.zshrc"),
+      });
+    });
+
+    it("skips when the desired symlink already exists", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+        "~/.zshrc": { type: "SymbolicLink", target: normalizeTestPath("~/.dotfiles/.zshrc") },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "zshrc",
+          action: "skipped",
+          status: "installed",
+        }),
+      ]);
+    });
+
+    it("emits clear dry-run output for symlink creation", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+      const verboseMessages: string[] = [];
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            dryRun: true,
+            verbose: true,
+            onVerbose: (message) => verboseMessages.push(message),
+          });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "zshrc",
+          action: "skipped",
+          status: "missing",
+        }),
+      ]);
+      expect(verboseMessages).toContain(
+        `[zshrc] would install: create symlink ${normalizeTestPath("~/.zshrc")} -> ${normalizeTestPath("~/.dotfiles/.zshrc")}`,
+      );
+      expect(fileSystem.entries.has(normalizeTestPath("~/.zshrc"))).toBe(false);
+    });
+
+    it("fails with an actionable error when the symlink target is missing", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "zshrc",
+          action: "failed",
+          status: "error",
+        }),
+      );
+      expect(results[0].error).toContain("Symlink target");
+      expect(results[0].error).toContain("does not exist");
+    });
+
+    it("fails without --update when an existing symlink points elsewhere", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+        "~/.legacy/.zshrc": { type: "File" },
+        "~/.zshrc": { type: "SymbolicLink", target: normalizeTestPath("~/.legacy/.zshrc") },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "zshrc",
+          action: "failed",
+          status: "error",
+        }),
+      );
+      expect(results[0].error).toContain("Re-run with --update");
+      expect(results[0].error).toContain(normalizeTestPath("~/.legacy/.zshrc"));
+    });
+
+    it("updates an existing symlink target when --update is set", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+        "~/.legacy/.zshrc": { type: "File" },
+        "~/.zshrc": { type: "SymbolicLink", target: normalizeTestPath("~/.legacy/.zshrc") },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc", { backup: "~/.zshrc" }),
+        ]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, { update: true });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "zshrc",
+          action: "updated",
+          status: "installed",
+          backed_up: "/backup/~/.zshrc",
+        }),
+      ]);
+      expect(fileSystem.entries.get(normalizeTestPath("~/.zshrc"))).toEqual({
+        type: "SymbolicLink",
+        target: normalizeTestPath("~/.dotfiles/.zshrc"),
+      });
+    });
   });
 
   // Update mode tests
@@ -923,15 +1382,19 @@ describe("Executor", () => {
 
       const shell: ShellService = {
         run: (command) =>
-          command.startsWith("which ")
-            ? Effect.fail(
+          Effect.gen(function* () {
+            if (command.startsWith("which ")) {
+              return yield* Effect.fail(
                 new ShellError({
                   command,
                   exitCode: 1,
                   stderr: "not installed",
                 }),
-              )
-            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+              );
+            }
+
+            return { stdout: "", stderr: "", exitCode: 0 };
+          }),
         exec: (command, args) =>
           Effect.sync(() => {
             execCalls.push({ command, args });

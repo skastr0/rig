@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Schema } from "effect";
-import { BrewInstall, SystemItem } from "./config.js";
+import { BrewInstall, DirInstall, SymlinkInstall, SystemItem } from "./config.js";
 
 const decodeBrewInstall = Schema.decodeUnknown(BrewInstall);
+const decodeDirInstall = Schema.decodeUnknown(DirInstall);
+const decodeSymlinkInstall = Schema.decodeUnknown(SymlinkInstall);
 const decodeSystemItem = Schema.decodeUnknown(SystemItem);
 
-describe("BrewInstall schema", () => {
+describe("config schema", () => {
   it("accepts formula installs", async () => {
     const parsed = await Effect.runPromise(
       decodeBrewInstall({
@@ -50,6 +52,36 @@ describe("BrewInstall schema", () => {
       formula: "custom/tap/formula",
       tap: "custom/tap",
       args: ["--HEAD"],
+    });
+  });
+
+  it("accepts dir installs", async () => {
+    const parsed = await Effect.runPromise(
+      decodeDirInstall({
+        source: "dir",
+        path: "~/.config",
+      }),
+    );
+
+    expect(parsed).toEqual({
+      source: "dir",
+      path: "~/.config",
+    });
+  });
+
+  it("accepts symlink installs", async () => {
+    const parsed = await Effect.runPromise(
+      decodeSymlinkInstall({
+        source: "symlink",
+        path: "~/.zshrc",
+        target: "~/.dotfiles/.zshrc",
+      }),
+    );
+
+    expect(parsed).toEqual({
+      source: "symlink",
+      path: "~/.zshrc",
+      target: "~/.dotfiles/.zshrc",
     });
   });
 
@@ -138,5 +170,31 @@ describe("BrewInstall schema", () => {
       );
       expect(item.check, `${item.name} should compare command resolution`).toContain("command -v");
     }
+  });
+
+  it("default config uses dir sources for bootstrap directories", () => {
+    const rawConfig = readFileSync(new URL("../../system-config.json", import.meta.url), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      items: Array<{
+        name: string;
+        install: unknown;
+      }>;
+    };
+
+    const bootstrapItems = config.items.filter(
+      (item) => item.name === "projects-root" || item.name === "config-root",
+    );
+
+    expect(bootstrapItems).toHaveLength(2);
+    expect(bootstrapItems.every((item) => typeof item.install === "object")).toBe(true);
+    expect(
+      bootstrapItems.every(
+        (item) =>
+          typeof item.install === "object" &&
+          item.install !== null &&
+          "source" in item.install &&
+          item.install.source === "dir",
+      ),
+    ).toBe(true);
   });
 });

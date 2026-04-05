@@ -1,9 +1,12 @@
 import { Context, Effect, Layer, Ref, Deferred } from "effect";
 import { FileSystem } from "@effect/platform";
+import * as Path from "node:path";
 import type {
   SystemItem,
   GitInstall,
   BrewInstall,
+  DirInstall,
+  SymlinkInstall,
   TimeoutInput as ItemTimeoutInput,
 } from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
@@ -11,7 +14,7 @@ import { ShellService, type ShellResult } from "../services/ShellService.js";
 import { BackupService } from "../services/BackupService.js";
 import { GitService } from "../services/GitService.js";
 import { BrewService } from "../services/BrewService.js";
-import { ShellError, GitError, BrewError, BackupError } from "../errors.js";
+import { ShellError, GitError, BrewError, BackupError, FileSystemInstallError } from "../errors.js";
 import { expandPath } from "../utils.js";
 
 export type ItemStatus = "installed" | "missing" | "error" | "blocked";
@@ -24,11 +27,18 @@ export type ItemAction =
   | "timed_out"
   | "blocked";
 
+export interface ExecutionPreview {
+  readonly label: string;
+  readonly steps: readonly string[];
+}
+
 export interface ExecutionResult {
   readonly name: string;
   readonly status: ItemStatus;
   readonly action: ItemAction;
   readonly backed_up?: string;
+  readonly detail?: string;
+  readonly preview?: ExecutionPreview;
   readonly error?: string;
 }
 
@@ -59,12 +69,100 @@ const isGitInstall = (install: SystemItem["install"]): install is GitInstall =>
 const isBrewInstall = (install: SystemItem["install"]): install is BrewInstall =>
   typeof install === "object" && install.source === "brew";
 
+const isDirInstall = (install: SystemItem["install"]): install is DirInstall =>
+  typeof install === "object" && install.source === "dir";
+
+const isSymlinkInstall = (install: SystemItem["install"]): install is SymlinkInstall =>
+  typeof install === "object" && install.source === "symlink";
+
 const formatCommand = (command: string, args: readonly string[] = []): string =>
   args.length > 0 ? `${command} ${args.join(" ")}` : command;
 
-const getInstallCommands = (install: SystemItem["install"]): readonly string[] => {
+const normalizeManagedPath = (path: string): string =>
+  Path.normalize(Path.resolve(expandPath(path)));
+
+const normalizeSymlinkTargetForComparison = (linkPath: string, target: string): string =>
+  Path.normalize(
+    Path.resolve(
+      Path.dirname(linkPath),
+      Path.isAbsolute(expandPath(target)) ? expandPath(target) : target,
+    ),
+  );
+
+const getSymlinkLinkPath = (install: SymlinkInstall): string => normalizeManagedPath(install.path);
+
+const getSymlinkDisplayTarget = (install: SymlinkInstall): string =>
+  normalizeSymlinkTargetForComparison(getSymlinkLinkPath(install), install.target);
+
+const getSymlinkTargetForCreate = (target: string): string => {
+  const expandedTarget = expandPath(target);
+  return Path.isAbsolute(expandedTarget)
+    ? Path.normalize(Path.resolve(expandedTarget))
+    : Path.normalize(target);
+};
+
+const describePathType = (type: string): string => {
+  switch (type) {
+    case "Directory":
+      return "directory";
+    case "File":
+      return "file";
+    case "SymbolicLink":
+      return "symlink";
+    default:
+      return type.toLowerCase();
+  }
+};
+
+const formatUnknownError = (error: unknown): string => {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = error.message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+
+  return String(error);
+};
+
+const toFileSystemInstallError = (path: string, reason: string): FileSystemInstallError =>
+  new FileSystemInstallError({ path, reason });
+
+const mapFileSystemError =
+  (path: string, context: string) =>
+  (error: unknown): FileSystemInstallError =>
+    toFileSystemInstallError(path, `${context}: ${formatUnknownError(error)}`);
+
+const getCheckDescription = (item: SystemItem): string => {
+  if (isDirInstall(item.install)) {
+    return normalizeManagedPath(item.install.path);
+  }
+
+  if (isSymlinkInstall(item.install)) {
+    return `${getSymlinkLinkPath(item.install)} -> ${getSymlinkDisplayTarget(item.install)}`;
+  }
+
+  return item.check;
+};
+
+type ItemCheckResult =
+  | { type: "installed" }
+  | { type: "missing" }
+  | { type: "needs_update"; reason: string };
+
+const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string[] => {
   if (typeof install === "string") {
     return [install];
+  }
+
+  if (isDirInstall(install)) {
+    return [`create directory ${normalizeManagedPath(install.path)}`];
+  }
+
+  if (isSymlinkInstall(install)) {
+    const linkPath = getSymlinkLinkPath(install);
+    const targetPath = getSymlinkDisplayTarget(install);
+    return [`create symlink ${linkPath} -> ${targetPath}`];
   }
 
   if (isBrewInstall(install)) {
@@ -118,6 +216,41 @@ const getInstallCommands = (install: SystemItem["install"]): readonly string[] =
   return [];
 };
 
+const getInstallPreview = (install: SystemItem["install"]): ExecutionPreview => ({
+  label:
+    typeof install === "string"
+      ? "shell install command"
+      : `structured install (${install.source})`,
+  steps: getInstallPreviewSteps(install),
+});
+
+const getManagedUpdatePreviewSteps = (install: SymlinkInstall): readonly string[] => {
+  const linkPath = getSymlinkLinkPath(install);
+  const targetPath = getSymlinkDisplayTarget(install);
+  return [`update symlink ${linkPath} -> ${targetPath}`];
+};
+
+const getManagedUpdatePreview = (install: SymlinkInstall): ExecutionPreview => ({
+  label: "structured update (symlink)",
+  steps: getManagedUpdatePreviewSteps(install),
+});
+
+const getExecutionDetail = (install: SystemItem["install"]): string | undefined => {
+  if (isDirInstall(install) || isSymlinkInstall(install)) {
+    return getInstallPreviewSteps(install)[0];
+  }
+
+  return undefined;
+};
+
+const getManagedUpdateDetail = (install: SymlinkInstall): string =>
+  getManagedUpdatePreviewSteps(install)[0]!;
+
+const getShellUpdatePreview = (command: string): ExecutionPreview => ({
+  label: "shell update command",
+  steps: [command],
+});
+
 const emitVerbose = (options: ExecutorOptions | undefined, message: string): void => {
   if (options?.verbose) {
     options.onVerbose?.(message);
@@ -164,7 +297,7 @@ const runShellCommand = (
     .run(command, toTimeoutOptions(timeout))
     .pipe(Effect.tap((result) => Effect.sync(() => emitCommandOutput(itemName, result, options))));
 
-const checkItem = (
+const checkGenericItem = (
   item: SystemItem,
   shell: ShellService,
 ): Effect.Effect<boolean, ShellError, FileSystem.FileSystem> => {
@@ -184,19 +317,226 @@ const checkItem = (
   );
 };
 
+const checkDirInstall = (
+  install: DirInstall,
+): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = normalizeManagedPath(install.path);
+    const exists = yield* fs
+      .exists(path)
+      .pipe(
+        Effect.mapError(mapFileSystemError(path, `Failed to inspect directory path "${path}"`)),
+      );
+
+    if (!exists) {
+      return { type: "missing" };
+    }
+
+    const stat = yield* fs
+      .stat(path)
+      .pipe(
+        Effect.mapError(mapFileSystemError(path, `Failed to inspect directory path "${path}"`)),
+      );
+
+    if (stat.type === "Directory") {
+      return { type: "installed" };
+    }
+
+    return yield* Effect.fail(
+      toFileSystemInstallError(
+        path,
+        `Expected directory at "${path}", but found ${describePathType(stat.type)}. Remove or rename the existing path, or choose a different dir path.`,
+      ),
+    );
+  });
+
+const checkSymlinkInstall = (
+  install: SymlinkInstall,
+): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const linkPath = getSymlinkLinkPath(install);
+    const targetPath = getSymlinkDisplayTarget(install);
+    const parentPath = Path.dirname(linkPath);
+
+    const targetExists = yield* fs
+      .exists(targetPath)
+      .pipe(
+        Effect.mapError(
+          mapFileSystemError(targetPath, `Failed to inspect symlink target for "${linkPath}"`),
+        ),
+      );
+
+    if (!targetExists) {
+      return yield* Effect.fail(
+        toFileSystemInstallError(
+          linkPath,
+          `Symlink target "${targetPath}" does not exist. Create the target first or update install.target.`,
+        ),
+      );
+    }
+
+    const parentExists = yield* fs
+      .exists(parentPath)
+      .pipe(
+        Effect.mapError(
+          mapFileSystemError(parentPath, `Failed to inspect parent directory for "${linkPath}"`),
+        ),
+      );
+
+    if (!parentExists) {
+      return yield* Effect.fail(
+        toFileSystemInstallError(
+          linkPath,
+          `Parent directory "${parentPath}" is missing for symlink "${linkPath}". Add a dir item or dependency before this symlink.`,
+        ),
+      );
+    }
+
+    const linkExists = yield* fs
+      .exists(linkPath)
+      .pipe(
+        Effect.mapError(
+          mapFileSystemError(linkPath, `Failed to inspect symlink path "${linkPath}"`),
+        ),
+      );
+
+    if (!linkExists) {
+      return { type: "missing" };
+    }
+
+    const stat = yield* fs
+      .stat(linkPath)
+      .pipe(
+        Effect.mapError(
+          mapFileSystemError(linkPath, `Failed to inspect symlink path "${linkPath}"`),
+        ),
+      );
+
+    if (stat.type === "SymbolicLink") {
+      const currentTarget = yield* fs
+        .readLink(linkPath)
+        .pipe(
+          Effect.mapError(
+            mapFileSystemError(
+              linkPath,
+              `Failed to read existing symlink target for "${linkPath}"`,
+            ),
+          ),
+        );
+      const normalizedCurrentTarget = normalizeSymlinkTargetForComparison(linkPath, currentTarget);
+
+      if (normalizedCurrentTarget === targetPath) {
+        return { type: "installed" };
+      }
+
+      return {
+        type: "needs_update",
+        reason: `Symlink "${linkPath}" points to "${normalizedCurrentTarget}" instead of "${targetPath}". Re-run with --update to replace it, or fix the existing link manually.`,
+      };
+    }
+
+    return {
+      type: "needs_update",
+      reason: `Path "${linkPath}" exists as a ${describePathType(stat.type)}, not the desired symlink to "${targetPath}". Re-run with --update to replace it, or move/remove the existing path manually.`,
+    };
+  });
+
+const checkItem = (
+  item: SystemItem,
+  shell: ShellService,
+): Effect.Effect<ItemCheckResult, ShellError | FileSystemInstallError, FileSystem.FileSystem> => {
+  if (isDirInstall(item.install)) {
+    return checkDirInstall(item.install);
+  }
+
+  if (isSymlinkInstall(item.install)) {
+    return checkSymlinkInstall(item.install);
+  }
+
+  return checkGenericItem(item, shell).pipe(
+    Effect.map((isInstalled) => (isInstalled ? { type: "installed" } : { type: "missing" })),
+  );
+};
+
+const installDirItem = (
+  install: DirInstall,
+  fs: FileSystem.FileSystem,
+): Effect.Effect<void, FileSystemInstallError> => {
+  const path = normalizeManagedPath(install.path);
+  return fs
+    .makeDirectory(path, { recursive: true })
+    .pipe(Effect.mapError(mapFileSystemError(path, `Failed to create directory "${path}"`)));
+};
+
+const createSymlink = (
+  install: SymlinkInstall,
+  fs: FileSystem.FileSystem,
+): Effect.Effect<void, FileSystemInstallError> => {
+  const linkPath = getSymlinkLinkPath(install);
+  const rawTarget = getSymlinkTargetForCreate(install.target);
+  const displayTarget = getSymlinkDisplayTarget(install);
+
+  return fs
+    .symlink(rawTarget, linkPath)
+    .pipe(
+      Effect.mapError(
+        mapFileSystemError(
+          linkPath,
+          `Failed to create symlink "${linkPath}" -> "${displayTarget}"`,
+        ),
+      ),
+    );
+};
+
+const updateSymlinkItem = (
+  install: SymlinkInstall,
+  fs: FileSystem.FileSystem,
+): Effect.Effect<void, FileSystemInstallError> => {
+  const linkPath = getSymlinkLinkPath(install);
+
+  return Effect.gen(function* () {
+    yield* fs
+      .remove(linkPath, { recursive: true })
+      .pipe(
+        Effect.mapError(
+          mapFileSystemError(
+            linkPath,
+            `Failed to remove existing path at "${linkPath}" before updating symlink`,
+          ),
+        ),
+      );
+    yield* createSymlink(install, fs);
+  });
+};
+
 const installItem = (
   item: SystemItem,
   shell: ShellService,
   git: GitService,
   brew: BrewService,
+  fs: FileSystem.FileSystem,
   options: ExecutorOptions | undefined,
-): Effect.Effect<void, ShellError | GitError | BrewError, ShellService> => {
+): Effect.Effect<
+  void,
+  ShellError | GitError | BrewError | FileSystemInstallError,
+  ShellService
+> => {
   if (isGitInstall(item.install)) {
     return git.clone(item.install, toTimeoutOptions(item.timeout));
   }
 
   if (isBrewInstall(item.install)) {
     return brew.install(item.install, toTimeoutOptions(item.timeout));
+  }
+
+  if (isDirInstall(item.install)) {
+    return installDirItem(item.install, fs);
+  }
+
+  if (isSymlinkInstall(item.install)) {
+    return createSymlink(item.install, fs);
   }
 
   return runShellCommand(item.name, item.install, shell, item.timeout, options).pipe(Effect.asVoid);
@@ -206,7 +546,7 @@ const updateItem = (
   item: SystemItem,
   shell: ShellService,
   options: ExecutorOptions | undefined,
-): Effect.Effect<void, ShellError, ShellService> => {
+): Effect.Effect<void, ShellError, never> => {
   // Update command is always a string (git updates handled via install strategy)
   if (!item.update) {
     return Effect.void;
@@ -278,7 +618,7 @@ const executeItem = (
   groupLocks: Ref.Ref<Map<string, Deferred.Deferred<void>>>,
 ): Effect.Effect<
   ExecutionResult,
-  ShellError | GitError | BrewError | BackupError,
+  ShellError | GitError | BrewError | BackupError | FileSystemInstallError,
   ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
@@ -286,6 +626,7 @@ const executeItem = (
     const backup = yield* BackupService;
     const git = yield* GitService;
     const brew = yield* BrewService;
+    const fs = yield* FileSystem.FileSystem;
 
     const effectiveGroup = isBrewInstall(item.install) ? (item.group ?? "brew") : item.group;
 
@@ -293,20 +634,26 @@ const executeItem = (
     const lock = yield* acquireGroupLock(effectiveGroup, groupLocks);
 
     const executeWithLock = Effect.gen(function* () {
-      emitVerbose(options, `[${item.name}] check: ${item.check}`);
-      const isInstalled = yield* checkItem(item, shell);
+      emitVerbose(options, `[${item.name}] check: ${getCheckDescription(item)}`);
+      const itemState = yield* checkItem(item, shell);
 
       // Case 1: Item is installed
-      if (isInstalled) {
+      if (itemState.type === "installed") {
         // Check if we should run update
         if (options?.update && item.update) {
           // Case 1a: Dry run - show what would be updated
           if (options?.dryRun) {
-            emitVerbose(options, `[${item.name}] would update: ${item.update}`);
+            const preview = getShellUpdatePreview(item.update);
+
+            for (const step of preview.steps) {
+              emitVerbose(options, `[${item.name}] would update: ${step}`);
+            }
+
             const result: ExecutionResult = {
               name: item.name,
               status: "installed",
               action: "would_update",
+              preview,
             };
             options?.onProgress?.(result);
             return result;
@@ -353,17 +700,96 @@ const executeItem = (
         return result;
       }
 
+      if (itemState.type === "needs_update") {
+        if (!isSymlinkInstall(item.install)) {
+          return yield* Effect.fail(
+            toFileSystemInstallError(
+              item.name,
+              `Unexpected managed update state for item "${item.name}".`,
+            ),
+          );
+        }
+
+        if (!options?.update) {
+          return yield* Effect.fail(
+            toFileSystemInstallError(getSymlinkLinkPath(item.install), itemState.reason),
+          );
+        }
+
+        if (options?.dryRun) {
+          const preview = getManagedUpdatePreview(item.install);
+
+          for (const step of preview.steps) {
+            emitVerbose(options, `[${item.name}] would update: ${step}`);
+          }
+
+          const result: ExecutionResult = {
+            name: item.name,
+            status: "installed",
+            action: "would_update",
+            detail: getManagedUpdateDetail(item.install),
+            preview,
+          };
+          options?.onProgress?.(result);
+          return result;
+        }
+
+        let backedUp: string | undefined;
+
+        if (item.backup) {
+          emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
+          const backupResult = yield* backup.backup(item.backup);
+          if (!backupResult.skipped) {
+            backedUp = backupResult.destination;
+          }
+        }
+
+        for (const step of getManagedUpdatePreviewSteps(item.install)) {
+          emitVerbose(options, `[${item.name}] update: ${step}`);
+        }
+
+        yield* updateSymlinkItem(item.install, fs);
+
+        const result: ExecutionResult = backedUp
+          ? {
+              name: item.name,
+              status: "installed",
+              action: "updated",
+              backed_up: backedUp,
+            }
+          : {
+              name: item.name,
+              status: "installed",
+              action: "updated",
+            };
+
+        options?.onProgress?.(result);
+        return result;
+      }
+
       // Case 2: Item is missing
       if (options?.dryRun) {
-        for (const command of getInstallCommands(item.install)) {
+        const preview = getInstallPreview(item.install);
+        const detail = getExecutionDetail(item.install);
+
+        for (const command of preview.steps) {
           emitVerbose(options, `[${item.name}] would install: ${command}`);
         }
 
-        const result: ExecutionResult = {
-          name: item.name,
-          status: "missing",
-          action: "skipped",
-        };
+        const result: ExecutionResult = detail
+          ? {
+              name: item.name,
+              status: "missing",
+              action: "skipped",
+              detail,
+              preview,
+            }
+          : {
+              name: item.name,
+              status: "missing",
+              action: "skipped",
+              preview,
+            };
         options?.onProgress?.(result);
         return result;
       }
@@ -379,11 +805,13 @@ const executeItem = (
         }
       }
 
-      for (const command of getInstallCommands(item.install)) {
+      const installPreview = getInstallPreview(item.install);
+
+      for (const command of installPreview.steps) {
         emitVerbose(options, `[${item.name}] install: ${command}`);
       }
 
-      yield* installItem(item, shell, git, brew, options);
+      yield* installItem(item, shell, git, brew, fs, options);
 
       const result: ExecutionResult = backedUp
         ? {
@@ -413,7 +841,7 @@ const formatReason = (reason: string, fallback: string): string => {
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
-type ExecutionError = ShellError | GitError | BrewError | BackupError;
+type ExecutionError = ShellError | GitError | BrewError | BackupError | FileSystemInstallError;
 
 const isTimeoutError = (error: ExecutionError): boolean =>
   ("timedOut" in error && error.timedOut === true) || false;
@@ -437,6 +865,8 @@ const formatError = (error: ExecutionError): string => {
         : `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}`;
     case "BackupError":
       return `Backup error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
+    case "FileSystemInstallError":
+      return `Filesystem item error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
   }
 };
 

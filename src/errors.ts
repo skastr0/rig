@@ -27,6 +27,11 @@ export class BrewError extends Data.TaggedError("BrewError")<{
   readonly timeoutMs?: number;
 }> {}
 
+export class FileSystemInstallError extends Data.TaggedError("FileSystemInstallError")<{
+  readonly path: string;
+  readonly reason: string;
+}> {}
+
 export class ValidationError extends Data.TaggedError("ValidationError")<{
   readonly issues: readonly string[];
 }> {}

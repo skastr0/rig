@@ -31,9 +31,26 @@ export const BrewInstall = Schema.Struct({
 
 export type BrewInstall = Schema.Schema.Type<typeof BrewInstall>;
 
+export const DirInstall = Schema.Struct({
+  source: Schema.Literal("dir"),
+  path: Schema.String.pipe(Schema.minLength(1)),
+});
+
+export type DirInstall = Schema.Schema.Type<typeof DirInstall>;
+
+export const SymlinkInstall = Schema.Struct({
+  source: Schema.Literal("symlink"),
+  path: Schema.String.pipe(Schema.minLength(1)),
+  target: Schema.String.pipe(Schema.minLength(1)),
+});
+
+export type SymlinkInstall = Schema.Schema.Type<typeof SymlinkInstall>;
+
 export const InstallStrategy = Schema.Union(
   GitInstall,
   BrewInstall,
+  DirInstall,
+  SymlinkInstall,
   Schema.String.pipe(Schema.minLength(1)),
 );
 
