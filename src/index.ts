@@ -1,6 +1,8 @@
 import { Cause, Effect } from "effect";
 import { BunRuntime } from "@effect/platform-bun";
 import { runCli, type CliOptions } from "./cli.js";
+import { resolveConfigSource } from "./configSource.js";
+import { resolveExecutionMode } from "./executionMode.js";
 import { ConfigService } from "./services/ConfigService.js";
 import { AppLayer } from "./services/AppLayer.js";
 import { topologicalSort } from "./engine/Planner.js";
@@ -14,6 +16,7 @@ import {
   ShellError,
   GitError,
   BackupError,
+  FileSystemInstallError,
 } from "./errors.js";
 
 const formatError = (error: unknown): string => {
@@ -35,6 +38,9 @@ const formatError = (error: unknown): string => {
   if (error instanceof BackupError) {
     return `Backup error for ${error.path}: ${error.reason}`;
   }
+  if (error instanceof FileSystemInstallError) {
+    return `Filesystem item error for ${error.path}: ${error.reason}`;
+  }
   return String(error);
 };
 
@@ -44,7 +50,12 @@ const handler = (options: CliOptions) =>
     const configService = yield* ConfigService;
     const executor = yield* Executor;
 
-    const config = yield* configService.load(options.config, options.profile);
+    const configSource = yield* resolveConfigSource(options.config);
+    const executionMode = resolveExecutionMode(configSource, options);
+
+    reporter.printConfigSource(configSource, executionMode);
+
+    const config = yield* configService.load(configSource, options.profile);
     const items = selectItems(config.items, options);
 
     if (items.length === 0) {
@@ -54,10 +65,10 @@ const handler = (options: CliOptions) =>
 
     const plan = yield* topologicalSort(items);
 
-    reporter.printPlan(plan, options.dryRun);
+    reporter.printPlan(plan, executionMode.dryRun);
 
     const results = yield* executor.execute(plan, {
-      dryRun: options.dryRun,
+      dryRun: executionMode.dryRun,
       update: options.update,
       verbose: options.verbose,
       onProgress: reporter.printProgress,

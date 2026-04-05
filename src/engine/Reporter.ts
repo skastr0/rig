@@ -1,5 +1,12 @@
+import type { ConfigSource } from "../configSource.js";
+import {
+  formatConfigSource,
+  formatRemoteConfigIntegrity,
+  formatRemoteConfigPin,
+} from "../configSource.js";
+import type { ExecutionMode } from "../executionMode.js";
 import type { PlanResult } from "./Planner.js";
-import type { ExecutionResult } from "./Executor.js";
+import type { ExecutionPreview, ExecutionResult } from "./Executor.js";
 
 const colors = {
   reset: "\x1b[0m",
@@ -23,7 +30,20 @@ const formatFailureReason = (error: string | undefined): string => {
   return trimmed && trimmed.length > 0 ? trimmed : "Unknown failure";
 };
 
+const printPreview = (
+  preview: ExecutionPreview,
+  c: typeof colors,
+  log: (message: string) => void,
+): void => {
+  log(`    ${c.cyan}${symbols.arrow}${c.reset} ${preview.label}`);
+
+  for (const step of preview.steps) {
+    log(`      ${c.dim}${step}${c.reset}`);
+  }
+};
+
 export interface Reporter {
+  readonly printConfigSource: (source: ConfigSource, executionMode?: ExecutionMode) => void;
   readonly printPlan: (plan: PlanResult, dryRun?: boolean) => void;
   readonly printProgress: (result: ExecutionResult) => void;
   readonly printSummary: (results: readonly ExecutionResult[]) => void;
@@ -34,6 +54,50 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   const c = options?.noColor
     ? (Object.fromEntries(Object.keys(colors).map((k) => [k, ""])) as typeof colors)
     : colors;
+
+  const printConfigSource = (source: ConfigSource, executionMode?: ExecutionMode) => {
+    console.log(`\n${c.bold}Config Source:${c.reset} ${formatConfigSource(source)}\n`);
+
+    if (source._tag !== "https") {
+      return;
+    }
+
+    if (source.pin) {
+      console.log(
+        `  ${c.cyan}${symbols.arrow}${c.reset} Remote pin: ${formatRemoteConfigPin(source.pin)}`,
+      );
+    }
+
+    if (source.integrity) {
+      console.log(
+        `  ${c.cyan}${symbols.arrow}${c.reset} Remote integrity: ${formatRemoteConfigIntegrity(source.integrity)}`,
+      );
+    }
+
+    if (source.pin || source.integrity) {
+      console.log("");
+    }
+
+    if (executionMode === undefined) {
+      return;
+    }
+
+    if (executionMode._tag === "remote_apply") {
+      console.log(
+        `  ${c.green}${symbols.check}${c.reset} Remote trust: apply enabled by --apply\n`,
+      );
+      return;
+    }
+
+    if (executionMode._tag === "remote_preview") {
+      const guidance = executionMode.applyRequested
+        ? "--dry-run is active. Re-run with --apply and without --dry-run to execute this remote config."
+        : "Remote configs preview by default. Re-run with --apply to execute this config.";
+
+      console.log(`  ${c.yellow}${symbols.dot}${c.reset} Remote trust: preview only`);
+      console.log(`    ${c.dim}${symbols.arrow}${c.reset} ${guidance}\n`);
+    }
+  };
 
   const printVerbose = (message: string) => {
     if (!options?.verbose) {
@@ -60,7 +124,7 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   };
 
   const printProgress = (result: ExecutionResult) => {
-    const { name, status, action, backed_up, error } = result;
+    const { name, status, action, backed_up, detail, preview, error } = result;
 
     let statusIcon: string;
     let statusColor: string;
@@ -111,10 +175,15 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     }
 
     const backupInfo = backed_up ? ` ${c.dim}(backed up)${c.reset}` : "";
+    const detailInfo = detail ? ` ${c.dim}(${detail})${c.reset}` : "";
 
     console.log(
-      `  ${statusColor}${statusIcon}${c.reset} ${name} ${c.dim}${symbols.arrow}${c.reset} ${actionText}${backupInfo}`,
+      `  ${statusColor}${statusIcon}${c.reset} ${name} ${c.dim}${symbols.arrow}${c.reset} ${actionText}${backupInfo}${detailInfo}`,
     );
+
+    if (preview) {
+      printPreview(preview, c, console.log);
+    }
 
     if (action === "failed" || action === "timed_out" || action === "blocked") {
       console.log(
@@ -189,7 +258,7 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     console.log("");
   };
 
-  return { printPlan, printProgress, printSummary, printVerbose };
+  return { printConfigSource, printPlan, printProgress, printSummary, printVerbose };
 };
 
 export const defaultReporter = createReporter();

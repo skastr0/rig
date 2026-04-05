@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Effect } from "effect";
+import { resolveConfigSource } from "../configSource.js";
 import { createReporter } from "./Reporter.js";
 import { topologicalSort } from "./Planner.js";
 import type { ExecutionResult } from "./Executor.js";
 import type { SystemItem } from "../schema/config.js";
+
+const pinnedCommit = "0123456789abcdef0123456789abcdef01234567";
+const integrityDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const makeItem = (name: string, dependsOn?: string[]): SystemItem => ({
   name,
@@ -25,6 +29,82 @@ describe("Reporter", () => {
 
   afterEach(() => {
     consoleSpy.mockRestore();
+  });
+
+  describe("printConfigSource", () => {
+    it("should print the resolved remote config source", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printConfigSource({
+        _tag: "https",
+        url: "https://example.com/system-config.json",
+      });
+
+      expect(output.some((line) => line.includes("Config Source"))).toBe(true);
+      expect(
+        output.some((line) => line.includes("remote HTTPS https://example.com/system-config.json")),
+      ).toBe(true);
+    });
+
+    it("should show the canonical raw GitHub URL for shorthand sources", async () => {
+      const reporter = createReporter({ noColor: true });
+      const source = await Effect.runPromise(
+        resolveConfigSource("gh:guilhermecastro/system-setup/configs/work.json"),
+      );
+
+      reporter.printConfigSource(source);
+
+      expect(
+        output.some((line) =>
+          line.includes(
+            "remote HTTPS https://raw.githubusercontent.com/guilhermecastro/system-setup/HEAD/configs/work.json",
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("should explain that remote configs preview by default", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printConfigSource(
+        {
+          _tag: "https",
+          url: "https://example.com/system-config.json",
+        },
+        {
+          _tag: "remote_preview",
+          dryRun: true,
+          applyRequested: false,
+        },
+      );
+
+      expect(output.some((line) => line.includes("Remote trust: preview only"))).toBe(true);
+      expect(output.some((line) => line.includes("Re-run with --apply"))).toBe(true);
+    });
+
+    it("should print pinning and integrity metadata for audited remote configs", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printConfigSource({
+        _tag: "https",
+        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+        pin: {
+          provider: "github",
+          ref: pinnedCommit,
+        },
+        integrity: {
+          algorithm: "sha256",
+          expected: integrityDigest,
+        },
+      });
+
+      expect(
+        output.some((line) => line.includes(`Remote pin: GitHub commit ${pinnedCommit}`)),
+      ).toBe(true);
+      expect(
+        output.some((line) => line.includes(`Remote integrity: sha256:${integrityDigest}`)),
+      ).toBe(true);
+    });
   });
 
   describe("printPlan", () => {
@@ -86,6 +166,21 @@ describe("Reporter", () => {
       });
 
       expect(output.some((line) => line.includes("would install"))).toBe(true);
+    });
+
+    it("should include detail text when provided", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "projects-root",
+        status: "missing",
+        action: "skipped",
+        detail: "create directory /Users/test/Projects",
+      });
+
+      expect(output.some((line) => line.includes("create directory /Users/test/Projects"))).toBe(
+        true,
+      );
     });
 
     it("should print updated status", () => {
@@ -166,6 +261,23 @@ describe("Reporter", () => {
 
       expect(output.some((line) => line.includes("blocked by dependency"))).toBe(true);
       expect(output.some((line) => line.includes("homebrew"))).toBe(true);
+    });
+
+    it("should print preview labels and steps when provided", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printProgress({
+        name: "test",
+        status: "missing",
+        action: "skipped",
+        preview: {
+          label: "shell install command",
+          steps: ["brew install test"],
+        },
+      });
+
+      expect(output.some((line) => line.includes("shell install command"))).toBe(true);
+      expect(output.some((line) => line.includes("brew install test"))).toBe(true);
     });
   });
 
