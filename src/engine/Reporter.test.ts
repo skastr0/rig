@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { resolveConfigSource } from "../configSource.js";
 import { createReporter } from "./Reporter.js";
 import { topologicalSort } from "./Planner.js";
-import type { ExecutionResult } from "./Executor.js";
+import type { ExecutionResult, InspectionResult } from "./Executor.js";
 import type { SystemItem } from "../schema/config.js";
 
 const pinnedCommit = "0123456789abcdef0123456789abcdef01234567";
@@ -370,6 +370,80 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("1 blocked by dependencies"))).toBe(true);
       expect(output.some((line) => line.includes("homebrew:"))).toBe(true);
       expect(output.some((line) => line.includes("neovim:"))).toBe(true);
+    });
+  });
+
+  describe("printStatus", () => {
+    it("should print status rows and summary counts", () => {
+      const reporter = createReporter({ noColor: true });
+
+      const results: InspectionResult[] = [
+        { name: "git", status: "installed" },
+        { name: "ripgrep", status: "missing" },
+        {
+          name: "dotfiles",
+          status: "updateable",
+          detail: "update symlink /Users/test/.zshrc -> /Users/test/.dotfiles/.zshrc",
+          reason: "Symlink target differs from the desired target.",
+        },
+        {
+          name: "neovim",
+          status: "blocked",
+          reason: "Blocked by dependency that is not ready: homebrew (missing)",
+        },
+      ];
+
+      reporter.printStatus(results);
+
+      expect(output.some((line) => line.includes("Status:"))).toBe(true);
+      expect(output.some((line) => line.includes("git") && line.includes("installed"))).toBe(true);
+      expect(output.some((line) => line.includes("ripgrep") && line.includes("missing"))).toBe(
+        true,
+      );
+      expect(output.some((line) => line.includes("dotfiles") && line.includes("updateable"))).toBe(
+        true,
+      );
+      expect(output.some((line) => line.includes("neovim") && line.includes("blocked"))).toBe(true);
+      expect(output.some((line) => line.includes("1 updateable"))).toBe(true);
+      expect(output.some((line) => line.includes("1 blocked"))).toBe(true);
+    });
+  });
+
+  describe("printWhy", () => {
+    it("should print a why-selected report", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printWhy({
+        itemName: "homebrew",
+        selected: true,
+        lines: [
+          'Selected because it is required as a dependency of "ffmpeg".',
+          "Dependency path: ffmpeg -> homebrew",
+        ],
+      });
+
+      expect(output.some((line) => line.includes("Why Selected:"))).toBe(true);
+      expect(output.some((line) => line.includes("Dependency path: ffmpeg -> homebrew"))).toBe(
+        true,
+      );
+    });
+
+    it("should print a why-not-selected report", () => {
+      const reporter = createReporter({ noColor: true });
+
+      reporter.printWhy({
+        itemName: "slack",
+        selected: false,
+        lines: [
+          "Item exists in the resolved config but is not selected by the active filters.",
+          "--only currently selects: git, neovim",
+        ],
+      });
+
+      expect(output.some((line) => line.includes("Why Not Selected:"))).toBe(true);
+      expect(output.some((line) => line.includes("--only currently selects: git, neovim"))).toBe(
+        true,
+      );
     });
   });
 

@@ -9,7 +9,7 @@ import { BackupService, type BackupResult } from "../services/BackupService.js";
 import { GitService } from "../services/GitService.js";
 import { BrewService, BrewServiceLive } from "../services/BrewService.js";
 import type { SystemItem } from "../schema/config.js";
-import { ShellError } from "../errors.js";
+import { BrewError, GitError, ShellError } from "../errors.js";
 import { expandPath } from "../utils.js";
 
 const makeItem = (
@@ -634,6 +634,168 @@ describe("Executor", () => {
     expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "timed_out" }));
     expect(results[0].error).toContain("timed out");
     expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
+  });
+
+  it("blocks dependents only when an updateable dependency is not execution-ready", async () => {
+    const installed = new Set(["a"]);
+    const fileSystem = createMockFileSystem({
+      "~/.dotfiles/.zshrc": { type: "File" },
+      "~/.legacy/.zshrc": { type: "File" },
+      "~/.zshrc": { type: "SymbolicLink", target: normalizeTestPath("~/.legacy/.zshrc") },
+    });
+    const plan = await Effect.runPromise(
+      topologicalSort([
+        makeItem("a", { update: "tool update" }),
+        makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc"),
+        makeItem("b", { dependsOn: ["a"] }),
+        makeItem("c", { dependsOn: ["zshrc"] }),
+      ]),
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.inspect(plan);
+      }).pipe(Effect.provide(createTestLayer(installed, fileSystem))),
+    );
+
+    const resultByName = new Map(results.map((result) => [result.name, result]));
+
+    expect(resultByName.get("a")).toEqual(expect.objectContaining({ status: "updateable" }));
+    expect(resultByName.get("a")?.reason).toContain("Update command configured");
+
+    expect(resultByName.get("zshrc")).toEqual(expect.objectContaining({ status: "updateable" }));
+    expect(resultByName.get("zshrc")?.reason).toContain("Re-run with --update");
+
+    expect(resultByName.get("b")).toEqual(expect.objectContaining({ status: "missing" }));
+    expect(resultByName.get("c")).toEqual(expect.objectContaining({ status: "blocked" }));
+    expect(resultByName.get("c")?.reason).toContain("zshrc (updateable)");
+
+    expect(installed).toEqual(new Set(["a"]));
+    expect(fileSystem.entries.get(normalizeTestPath("~/.zshrc"))).toEqual({
+      type: "SymbolicLink",
+      target: normalizeTestPath("~/.legacy/.zshrc"),
+    });
+  });
+
+  it("preserves structured git failure detail in execution results", async () => {
+    const item: SystemItem = {
+      name: "dotfiles",
+      check: "which dotfiles",
+      install: {
+        source: "git",
+        repo: "https://github.com/example/dotfiles.git",
+        path: "~/dotfiles",
+      },
+    };
+
+    const shell: ShellService = {
+      run: (command) =>
+        command === "which dotfiles"
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not installed",
+              }),
+            )
+          : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const git: GitService = {
+      clone: () =>
+        Effect.fail(
+          new GitError({
+            repo: "https://github.com/example/dotfiles.git",
+            reason: "Failed to clone to /Users/test/dotfiles",
+            command: "git clone https://github.com/example/dotfiles.git /Users/test/dotfiles",
+            exitCode: 128,
+            stderr: "fatal: repository not found",
+          }),
+        ),
+    };
+
+    const plan = await Effect.runPromise(topologicalSort([item]));
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, git),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]?.action).toBe("failed");
+    expect(results[0]?.error).toContain("Git error for https://github.com/example/dotfiles.git");
+    expect(results[0]?.error).toContain(
+      "Command: git clone https://github.com/example/dotfiles.git /Users/test/dotfiles",
+    );
+    expect(results[0]?.error).toContain("Exit code: 128");
+    expect(results[0]?.error).toContain("Stderr: fatal: repository not found");
+  });
+
+  it("preserves structured brew failure detail in execution results", async () => {
+    const shell: ShellService = {
+      run: (command) =>
+        command === "which rg"
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not installed",
+              }),
+            )
+          : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const brew: BrewService = {
+      install: () =>
+        Effect.fail(
+          new BrewError({
+            formula_or_cask: "ripgrep",
+            reason: "Failed to install formula ripgrep",
+            command: "brew install ripgrep",
+            exitCode: 1,
+            stderr: "Error: network unavailable",
+          }),
+        ),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([makeBrewItem("rg", { formula: "ripgrep" })]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, brew),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]?.action).toBe("failed");
+    expect(results[0]?.error).toContain("Brew error for ripgrep");
+    expect(results[0]?.error).toContain("Command: brew install ripgrep");
+    expect(results[0]?.error).toContain("Exit code: 1");
+    expect(results[0]?.error).toContain("Stderr: Error: network unavailable");
   });
 
   it("passes configured timeout to shell checks and installs", async () => {

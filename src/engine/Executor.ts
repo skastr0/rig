@@ -42,6 +42,24 @@ export interface ExecutionResult {
   readonly error?: string;
 }
 
+export type InspectionStatus = "installed" | "missing" | "updateable" | "blocked" | "error";
+
+export interface InspectionResult {
+  readonly name: string;
+  readonly status: InspectionStatus;
+  readonly detail?: string;
+  readonly reason?: string;
+}
+
+interface ReadyInspectionResult extends InspectionResult {
+  readonly readyForExecution: boolean;
+}
+
+export interface InspectionOptions {
+  readonly verbose?: boolean;
+  readonly onVerbose?: (message: string) => void;
+}
+
 export interface ExecutorOptions {
   readonly dryRun?: boolean;
   readonly update?: boolean;
@@ -59,6 +77,10 @@ export interface Executor {
     never,
     ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
   >;
+  readonly inspect: (
+    plan: PlanResult,
+    options?: InspectionOptions,
+  ) => Effect.Effect<readonly InspectionResult[], never, ShellService | FileSystem.FileSystem>;
 }
 
 export const Executor = Context.GenericTag<Executor>("Executor");
@@ -843,6 +865,27 @@ const formatReason = (reason: string, fallback: string): string => {
 
 type ExecutionError = ShellError | GitError | BrewError | BackupError | FileSystemInstallError;
 
+const formatStructuredCommandDetail = (
+  error: Pick<GitError | BrewError, "command" | "exitCode" | "stderr">,
+): string => {
+  const details: string[] = [];
+
+  if (error.command) {
+    details.push(`Command: ${error.command}`);
+  }
+
+  if (error.exitCode !== undefined && error.exitCode >= 0) {
+    details.push(`Exit code: ${error.exitCode}`);
+  }
+
+  const stderr = error.stderr?.trim();
+  if (stderr && stderr.length > 0) {
+    details.push(`Stderr: ${stderr}`);
+  }
+
+  return details.length === 0 ? "" : `\n  ${details.join("\n  ")}`;
+};
+
 const isTimeoutError = (error: ExecutionError): boolean =>
   ("timedOut" in error && error.timedOut === true) || false;
 
@@ -857,12 +900,12 @@ const formatError = (error: ExecutionError): string => {
         : `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}`;
     case "GitError":
       return error.timedOut
-        ? `Git operation for ${error.repo} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}`
-        : `Git error for ${error.repo}: ${formatReason(error.reason, "No reason provided")}`;
+        ? `Git operation for ${error.repo} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}${formatStructuredCommandDetail(error)}`
+        : `Git error for ${error.repo}: ${formatReason(error.reason, "No reason provided")}${formatStructuredCommandDetail(error)}`;
     case "BrewError":
       return error.timedOut
-        ? `Brew operation for ${error.formula_or_cask} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}`
-        : `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}`;
+        ? `Brew operation for ${error.formula_or_cask} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}${formatStructuredCommandDetail(error)}`
+        : `Brew error for ${error.formula_or_cask}: ${formatReason(error.reason, "No reason provided")}${formatStructuredCommandDetail(error)}`;
     case "BackupError":
       return `Backup error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
     case "FileSystemInstallError":
@@ -932,6 +975,118 @@ const makeBlockedResult = (item: SystemItem, blockedBy: readonly string[]): Exec
   error: formatBlockedReason(blockedBy),
 });
 
+const formatInspectionBlockedReason = (
+  blockedBy: readonly { readonly name: string; readonly status: InspectionStatus }[],
+): string => {
+  const detail = blockedBy
+    .map((dependency) => `${dependency.name} (${dependency.status})`)
+    .join(", ");
+
+  return blockedBy.length === 1
+    ? `Blocked by dependency that is not ready: ${detail}`
+    : `Blocked by dependencies that are not ready: ${detail}`;
+};
+
+const toInspectionResult = (
+  item: SystemItem,
+  itemState: ItemCheckResult,
+): ReadyInspectionResult => {
+  if (itemState.type === "installed" && item.update) {
+    return {
+      name: item.name,
+      status: "updateable",
+      detail: item.update,
+      reason: "Update command configured for this installed item.",
+      readyForExecution: true,
+    };
+  }
+
+  if (itemState.type === "installed") {
+    return {
+      name: item.name,
+      status: "installed",
+      readyForExecution: true,
+    };
+  }
+
+  if (itemState.type === "needs_update") {
+    const detail = isSymlinkInstall(item.install)
+      ? getManagedUpdateDetail(item.install)
+      : undefined;
+
+    return {
+      name: item.name,
+      status: "updateable",
+      reason: itemState.reason,
+      readyForExecution: false,
+      ...(detail === undefined ? {} : { detail }),
+    };
+  }
+
+  const detail = getExecutionDetail(item.install);
+
+  return {
+    name: item.name,
+    status: "missing",
+    readyForExecution: false,
+    ...(detail === undefined ? {} : { detail }),
+  };
+};
+
+const inspectLevel = (
+  level: readonly SystemItem[],
+  inspectionByName: ReadonlyMap<string, ReadyInspectionResult>,
+  options: InspectionOptions | undefined,
+): Effect.Effect<readonly ReadyInspectionResult[], never, ShellService | FileSystem.FileSystem> =>
+  Effect.forEach(
+    level,
+    (item): Effect.Effect<ReadyInspectionResult, never, ShellService | FileSystem.FileSystem> => {
+      const blockedBy = (item.dependsOn ?? [])
+        .map((dependencyName) => inspectionByName.get(dependencyName))
+        .filter(
+          (dependency): dependency is ReadyInspectionResult =>
+            dependency !== undefined && !dependency.readyForExecution,
+        )
+        .map((dependency) => ({ name: dependency.name, status: dependency.status }));
+
+      if (blockedBy.length > 0) {
+        return Effect.succeed<ReadyInspectionResult>({
+          name: item.name,
+          status: "blocked",
+          reason: formatInspectionBlockedReason(blockedBy),
+          readyForExecution: false,
+        });
+      }
+
+      return Effect.gen(function* () {
+        const shell = yield* ShellService;
+
+        emitVerbose(options, `[${item.name}] status check: ${getCheckDescription(item)}`);
+
+        const itemState = yield* checkItem(item, shell).pipe(
+          Effect.mapError((error) => formatError(error)),
+        );
+
+        return toInspectionResult(item, itemState);
+      }).pipe(
+        Effect.catchAll((reason) =>
+          Effect.succeed<ReadyInspectionResult>({
+            name: item.name,
+            status: "error",
+            reason,
+            readyForExecution: false,
+          }),
+        ),
+      );
+    },
+    { concurrency: "unbounded" },
+  );
+
+const stripInspectionReadiness = ({
+  readyForExecution: _ready,
+  ...result
+}: ReadyInspectionResult) => result;
+
 const orderLevelResults = (
   level: readonly SystemItem[],
   levelResults: readonly ExecutionResult[],
@@ -943,6 +1098,23 @@ const orderLevelResults = (
 export const ExecutorLive = Layer.succeed(
   Executor,
   Executor.of({
+    inspect: (plan, options) =>
+      Effect.gen(function* () {
+        const inspectionByName = new Map<string, ReadyInspectionResult>();
+        const results: InspectionResult[] = [];
+
+        for (const level of plan.levels) {
+          const levelResults = yield* inspectLevel(level, inspectionByName, options);
+
+          for (const result of levelResults) {
+            inspectionByName.set(result.name, result);
+          }
+
+          results.push(...levelResults.map(stripInspectionReadiness));
+        }
+
+        return results;
+      }),
     execute: (plan, options) =>
       Effect.gen(function* () {
         const groupLocks = yield* Ref.make(new Map<string, Deferred.Deferred<void>>());

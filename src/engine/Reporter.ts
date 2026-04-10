@@ -6,7 +6,7 @@ import {
 } from "../configSource.js";
 import type { ExecutionMode } from "../executionMode.js";
 import type { PlanResult } from "./Planner.js";
-import type { ExecutionPreview, ExecutionResult } from "./Executor.js";
+import type { ExecutionPreview, ExecutionResult, InspectionResult } from "./Executor.js";
 
 const colors = {
   reset: "\x1b[0m",
@@ -47,7 +47,15 @@ export interface Reporter {
   readonly printPlan: (plan: PlanResult, dryRun?: boolean) => void;
   readonly printProgress: (result: ExecutionResult) => void;
   readonly printSummary: (results: readonly ExecutionResult[]) => void;
+  readonly printStatus: (results: readonly InspectionResult[]) => void;
+  readonly printWhy: (report: WhyReport) => void;
   readonly printVerbose: (message: string) => void;
+}
+
+export interface WhyReport {
+  readonly itemName: string;
+  readonly selected: boolean;
+  readonly lines: readonly string[];
 }
 
 export const createReporter = (options?: { noColor?: boolean; verbose?: boolean }): Reporter => {
@@ -258,7 +266,93 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     console.log("");
   };
 
-  return { printConfigSource, printPlan, printProgress, printSummary, printVerbose };
+  const printStatus = (results: readonly InspectionResult[]) => {
+    const installed = results.filter((result) => result.status === "installed");
+    const missing = results.filter((result) => result.status === "missing");
+    const updateable = results.filter((result) => result.status === "updateable");
+    const blocked = results.filter((result) => result.status === "blocked");
+    const errored = results.filter((result) => result.status === "error");
+
+    console.log(`\n${c.bold}Status:${c.reset}\n`);
+
+    for (const result of results) {
+      const detailInfo = result.detail ? ` ${c.dim}(${result.detail})${c.reset}` : "";
+
+      switch (result.status) {
+        case "installed":
+          console.log(
+            `  ${c.green}${symbols.check}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} installed${detailInfo}`,
+          );
+          break;
+        case "missing":
+          console.log(
+            `  ${c.yellow}${symbols.dot}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} missing${detailInfo}`,
+          );
+          break;
+        case "updateable":
+          console.log(
+            `  ${c.cyan}${symbols.arrow}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} updateable${detailInfo}`,
+          );
+          break;
+        case "blocked":
+          console.log(
+            `  ${c.yellow}${symbols.dot}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} blocked`,
+          );
+          break;
+        case "error":
+          console.log(
+            `  ${c.red}${symbols.cross}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} error`,
+          );
+          break;
+      }
+
+      if (result.reason) {
+        console.log(`    ${c.dim}${symbols.arrow}${c.reset} ${result.reason}`);
+      }
+    }
+
+    console.log(`\n${c.bold}Status Summary:${c.reset}`);
+
+    if (installed.length > 0) {
+      console.log(`  ${c.green}${symbols.check}${c.reset} ${installed.length} installed`);
+    }
+    if (missing.length > 0) {
+      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${missing.length} missing`);
+    }
+    if (updateable.length > 0) {
+      console.log(`  ${c.cyan}${symbols.arrow}${c.reset} ${updateable.length} updateable`);
+    }
+    if (blocked.length > 0) {
+      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${blocked.length} blocked`);
+    }
+    if (errored.length > 0) {
+      console.log(`  ${c.red}${symbols.cross}${c.reset} ${errored.length} error`);
+    }
+
+    console.log("");
+  };
+
+  const printWhy = (report: WhyReport) => {
+    const heading = report.selected ? "Why Selected" : "Why Not Selected";
+
+    console.log(`\n${c.bold}${heading}:${c.reset} ${report.itemName}\n`);
+
+    for (const line of report.lines) {
+      console.log(`  ${c.cyan}${symbols.arrow}${c.reset} ${line}`);
+    }
+
+    console.log("");
+  };
+
+  return {
+    printConfigSource,
+    printPlan,
+    printProgress,
+    printSummary,
+    printStatus,
+    printWhy,
+    printVerbose,
+  };
 };
 
 export const defaultReporter = createReporter();
