@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SystemItem } from "../schema/config.js";
-import { selectItems } from "./Selection.js";
+import { analyzeSelection, selectItems } from "./Selection.js";
 
 const makeItem = (
   name: string,
@@ -58,5 +58,34 @@ describe("selectItems", () => {
     const selected = selectItems(items, { only: ["media-workflow"], tags: [] });
 
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "yt-dlp", "media-workflow"]);
+  });
+
+  it("records direct filter matches for why introspection", () => {
+    const items = [makeItem("ffmpeg", { tags: ["media", "cli"] })];
+
+    const selection = analyzeSelection(items, { only: ["ffmpeg"], tags: ["media"] });
+    const reason = selection.reasons.get("ffmpeg");
+
+    expect(reason).toEqual({
+      type: "filter",
+      onlyMatched: true,
+      matchedTags: ["media"],
+    });
+  });
+
+  it("records dependency paths for why introspection", () => {
+    const items = [
+      makeItem("homebrew"),
+      makeItem("yt-dlp", { dependsOn: ["homebrew"] }),
+      makeItem("media-workflow", { dependsOn: ["yt-dlp"], tags: ["media"] }),
+    ];
+
+    const selection = analyzeSelection(items, { only: ["media-workflow"], tags: [] });
+    const reason = selection.reasons.get("homebrew");
+
+    expect(reason).toEqual({
+      type: "dependency",
+      path: ["media-workflow", "yt-dlp", "homebrew"],
+    });
   });
 });
