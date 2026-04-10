@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Schema } from "effect";
-import { BrewInstall, DirInstall, SymlinkInstall, SystemItem } from "./config.js";
+import { renderStarterConfig } from "../starterConfig.js";
+import { BrewInstall, DirInstall, SymlinkInstall, SystemConfig, SystemItem } from "./config.js";
 
 const decodeBrewInstall = Schema.decodeUnknown(BrewInstall);
 const decodeDirInstall = Schema.decodeUnknown(DirInstall);
 const decodeSymlinkInstall = Schema.decodeUnknown(SymlinkInstall);
+const decodeSystemConfig = Schema.decodeUnknown(SystemConfig);
 const decodeSystemItem = Schema.decodeUnknown(SystemItem);
 
 describe("config schema", () => {
@@ -101,6 +103,23 @@ describe("config schema", () => {
       install: "brew install neovim",
       timeout: 5_000,
     });
+  });
+
+  it("renders the canonical starter config as readable JSON", async () => {
+    const starterConfig = await Effect.runPromise(renderStarterConfig());
+
+    expect(starterConfig).toBe(
+      `{\n  "items": [\n    {\n      "name": "neovim",\n      "check": "which nvim",\n      "install": "brew install neovim",\n      "group": "brew"\n    }\n  ]\n}\n`,
+    );
+  });
+
+  it("starter config output validates against the current schema", async () => {
+    const starterConfig = await Effect.runPromise(renderStarterConfig());
+    const parsed = JSON.parse(starterConfig) as unknown;
+
+    const decoded = await Effect.runPromise(decodeSystemConfig(parsed));
+
+    expect(decoded).toEqual(parsed);
   });
 
   it("rejects installs without formula or cask", async () => {
