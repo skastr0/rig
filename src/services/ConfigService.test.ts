@@ -5,6 +5,7 @@ import { FileSystem } from "@effect/platform";
 import { ConfigService, ConfigServiceLive } from "./ConfigService.js";
 import type { ConfigSource } from "../configSource.js";
 import { ConfigError } from "../errors.js";
+import { renderStarterConfig } from "../starterConfig.js";
 
 const pinnedCommit = "0123456789abcdef0123456789abcdef01234567";
 const malformedPinnedCommit = "not-a-40-char-commit";
@@ -12,8 +13,15 @@ const malformedPinnedCommit = "not-a-40-char-commit";
 const sha256Digest = (content: string): string =>
   createHash("sha256").update(content).digest("hex");
 
-const createMockFileSystem = (files: Record<string, string> = {}): FileSystem.FileSystem =>
-  ({
+type MockFileSystem = FileSystem.FileSystem & {
+  readonly files: Record<string, string>;
+};
+
+const createMockFileSystem = (seedFiles: Record<string, string> = {}): MockFileSystem => {
+  const files = { ...seedFiles };
+
+  return {
+    files,
     exists: (path: string) => Effect.succeed(Object.prototype.hasOwnProperty.call(files, path)),
     readFileString: (path: string) => {
       const content = files[path];
@@ -22,7 +30,12 @@ const createMockFileSystem = (files: Record<string, string> = {}): FileSystem.Fi
         ? Effect.fail(new Error(`Missing file: ${path}`))
         : Effect.succeed(content);
     },
-  }) as unknown as FileSystem.FileSystem;
+    writeFileString: (path: string, data: string) =>
+      Effect.sync(() => {
+        files[path] = data;
+      }),
+  } as unknown as MockFileSystem;
+};
 
 const loadConfig = (source: ConfigSource, files: Record<string, string> = {}, profile?: string) =>
   Effect.gen(function* () {
@@ -85,6 +98,79 @@ describe("ConfigService", () => {
     expect(result.items).toEqual([
       { name: "neovim", check: "which nvim", install: "brew install neovim" },
     ]);
+  });
+
+  it("writes the canonical starter config to a new local file", async () => {
+    const fileSystem = createMockFileSystem();
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const configService = yield* ConfigService;
+        return yield* configService.writeStarterConfig("./system-config.json");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(Layer.succeed(FileSystem.FileSystem, fileSystem), ConfigServiceLive),
+        ),
+      ),
+    );
+
+    const expectedContent = await Effect.runPromise(renderStarterConfig());
+
+    expect(result.path).toBe("./system-config.json");
+    expect(result.docsPath).toBe("USAGE.md#your-first-configuration");
+    expect(fileSystem.files["./system-config.json"]).toBe(expectedContent);
+  });
+
+  it("writes a starter config that loads without additional edits", async () => {
+    const fileSystem = createMockFileSystem();
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const configService = yield* ConfigService;
+
+        yield* configService.writeStarterConfig("./system-config.json");
+
+        return yield* configService.load({ _tag: "local", path: "./system-config.json" });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(Layer.succeed(FileSystem.FileSystem, fileSystem), ConfigServiceLive),
+        ),
+      ),
+    );
+
+    expect(result.items).toEqual([
+      {
+        name: "neovim",
+        check: "which nvim",
+        install: "brew install neovim",
+        group: "brew",
+      },
+    ]);
+  });
+
+  it("refuses to overwrite an existing local config file", async () => {
+    await expectConfigError(
+      Effect.gen(function* () {
+        const configService = yield* ConfigService;
+        return yield* configService.writeStarterConfig("./system-config.json");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(
+              FileSystem.FileSystem,
+              createMockFileSystem({
+                "./system-config.json": '{"items":[]}',
+              }),
+            ),
+            ConfigServiceLive,
+          ),
+        ),
+      ),
+      (error) => {
+        expect(error.message).toContain("Config file already exists");
+        expect(error.path).toBe("./system-config.json");
+      },
+    );
   });
 
   it("loads remote HTTPS config sources", async () => {
@@ -290,6 +376,75 @@ describe("ConfigService", () => {
       (error) => {
         expect(error.message).toContain("Schema validation failed:");
         expect(error.path).toBe("https://example.com/system-config.json");
+      },
+    );
+  });
+
+  it("fails explicitly for unknown profiles instead of falling back to base items", async () => {
+    await expectConfigError(
+      loadConfig(
+        { _tag: "local", path: "./system-config.json" },
+        {
+          "./system-config.json": JSON.stringify({
+            items: [{ name: "git", check: "which git", install: "brew install git" }],
+            profiles: {
+              work: {
+                items: [{ name: "slack", check: "which slack", install: "brew install slack" }],
+              },
+            },
+          }),
+        },
+        "personal",
+      ),
+      (error) => {
+        expect(error.message).toContain('Unknown profile "personal"');
+        expect(error.message).toContain("Available profiles: work.");
+      },
+    );
+  });
+
+  it("rejects duplicate base item names with actionable validation errors", async () => {
+    await expectConfigError(
+      loadConfig(
+        { _tag: "local", path: "./system-config.json" },
+        {
+          "./system-config.json": JSON.stringify({
+            items: [
+              { name: "git", check: "which git", install: "brew install git" },
+              { name: "git", check: "which git", install: "brew install git" },
+            ],
+          }),
+        },
+      ),
+      (error) => {
+        expect(error.message).toContain("Config validation failed:");
+        expect(error.message).toContain('Duplicate item name "git" in base items');
+        expect(error.message).toContain("items[0]");
+        expect(error.message).toContain("items[1]");
+        expect(error.message).toContain("Rename one of the items");
+      },
+    );
+  });
+
+  it("rejects profile redefinitions that forget to exclude the base item first", async () => {
+    await expectConfigError(
+      loadConfig(
+        { _tag: "local", path: "./system-config.json" },
+        {
+          "./system-config.json": JSON.stringify({
+            items: [{ name: "git", check: "which git", install: "brew install git" }],
+            profiles: {
+              work: {
+                items: [{ name: "git", check: "which git", install: "brew install git" }],
+              },
+            },
+          }),
+        },
+      ),
+      (error) => {
+        expect(error.message).toContain('Duplicate item name "git" in profile "work"');
+        expect(error.message).toContain("profiles.work.items[0]");
+        expect(error.message).toContain('add "git" to profiles.work.exclude');
       },
     );
   });
