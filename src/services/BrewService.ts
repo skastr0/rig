@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { BrewError } from "../errors.js";
+import { BrewError, ShellError } from "../errors.js";
 import { ShellService } from "./ShellService.js";
 import type { BrewInstall, TimeoutInput } from "../schema/config.js";
 
@@ -12,14 +12,13 @@ export interface BrewService {
 
 export const BrewService = Context.GenericTag<BrewService>("BrewService");
 
-const mapBrewShellError = (
-  formulaOrCask: string,
-  reason: string,
-  error: { readonly timedOut?: boolean; readonly timeoutMs?: number },
-): BrewError =>
+const mapBrewShellError = (formulaOrCask: string, reason: string, error: ShellError): BrewError =>
   new BrewError({
     formula_or_cask: formulaOrCask,
     reason,
+    command: error.command,
+    exitCode: error.exitCode,
+    stderr: error.stderr,
     ...(error.timedOut === undefined ? {} : { timedOut: error.timedOut }),
     ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
   });

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { GitError } from "../errors.js";
+import { GitError, ShellError } from "../errors.js";
 import { ShellService } from "./ShellService.js";
 import type { GitInstall, TimeoutInput } from "../schema/config.js";
 import { expandPath } from "../utils.js";
@@ -13,14 +13,13 @@ export interface GitService {
 
 export const GitService = Context.GenericTag<GitService>("GitService");
 
-const mapGitShellError = (
-  install: GitInstall,
-  reason: string,
-  error: { readonly timedOut?: boolean; readonly timeoutMs?: number },
-): GitError =>
+const mapGitShellError = (install: GitInstall, reason: string, error: ShellError): GitError =>
   new GitError({
     repo: install.repo,
     reason,
+    command: error.command,
+    exitCode: error.exitCode,
+    stderr: error.stderr,
     ...(error.timedOut === undefined ? {} : { timedOut: error.timedOut }),
     ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
   });
