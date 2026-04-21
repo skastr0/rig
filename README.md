@@ -7,8 +7,8 @@ Define your system configuration in JSON, and `system-setup` will install only w
 ## Quick Start
 
 ```bash
-# Install
-bun run build && bun run install:local
+# Install (compiles for your host and writes to ~/.local/bin/system-setup)
+bun install && bun run install:local
 
 # Create a config file
 cat > system-config.json << 'EOF'
@@ -61,19 +61,20 @@ Requires [Bun](https://bun.sh) 1.0+.
 git clone https://github.com/USER/system-setup.git
 cd system-setup
 bun install
-bun run build
 bun run install:local
 ```
 
-This installs the binary to `~/.local/bin/system-setup`.
+`install:local` compiles a binary for your host platform straight into `~/.local/bin/system-setup` (and ad-hoc codesigns it on macOS). No separate build step needed.
 
-### Manual Installation
+### Building Distribution Binaries
+
+To produce binaries for all four supported platforms (`darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`) under `dist/`:
 
 ```bash
 bun run build
-cp dist/system-setup-darwin-arm64 ~/.local/bin/system-setup  # adjust for your platform
-chmod +x ~/.local/bin/system-setup
 ```
+
+Use this when you want to upload binaries to a release or copy them to another machine. For installing on the current machine, prefer `bun run install:local`.
 
 ## Configuration
 

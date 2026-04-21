@@ -2,17 +2,17 @@
 
 import { mkdirSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
+import { compile, type Target } from "./compile";
 
-const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-const version = packageJson.version;
 const distDir = "dist";
+const version: string = JSON.parse(readFileSync("package.json", "utf8")).version;
 
-const targets = [
+const targets: readonly Target[] = [
   { platform: "darwin", arch: "x64" },
   { platform: "darwin", arch: "arm64" },
   { platform: "linux", arch: "x64" },
   { platform: "linux", arch: "arm64" },
-] as const;
+];
 
 console.log("Cleaning dist directory...");
 rmSync(distDir, { recursive: true, force: true });
@@ -20,39 +20,15 @@ mkdirSync(distDir, { recursive: true });
 
 console.log(`\nBuilding system-setup v${version}...\n`);
 
-for (const { platform, arch } of targets) {
-  const outfile = join(distDir, `system-setup-${platform}-${arch}`);
-
-  console.log(`Building ${platform}-${arch}...`);
-
+for (const target of targets) {
+  const outfile = join(distDir, `system-setup-${target.platform}-${target.arch}`);
+  console.log(`Building ${target.platform}-${target.arch}...`);
   try {
-    const buildResult = await Bun.build({
-      target: "bun",
-      compile: {
-        target: `bun-${platform}-${arch}`,
-        outfile,
-      },
-      entrypoints: ["src/index.ts"],
-      define: {
-        APP_VERSION: `'${version}'`,
-      },
-      minify: true,
-    });
-
-    if (!buildResult.success) {
-      console.error(`  Failed to build ${platform}-${arch}`);
-      for (const log of buildResult.logs) {
-        console.error(log);
-      }
-      continue;
-    }
-
-    await Bun.$`chmod +x ${outfile}`;
+    await compile(target, outfile);
     const { stdout } = await Bun.$`du -h ${outfile}`.quiet();
-    const size = stdout.toString().split("\t")[0];
-    console.log(`  ${outfile} (${size})`);
+    console.log(`  ${outfile} (${stdout.toString().split("\t")[0]})`);
   } catch (error) {
-    console.error(`  Error building ${platform}-${arch}:`, error);
+    console.error(`  Error building ${target.platform}-${target.arch}:`, error);
   }
 }
 
@@ -61,8 +37,8 @@ Build complete!
 
 Binaries available at: ${distDir}/
 
-To install locally:
-  cp ${distDir}/system-setup-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/' | sed 's/aarch64/arm64/') ~/.local/bin/system-setup
+To install locally (compiles for your host directly — does not require this build step):
+  bun run install:local
 
 To test:
   ./${distDir}/system-setup-darwin-arm64 --help
