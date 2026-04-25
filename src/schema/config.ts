@@ -4,6 +4,9 @@ import { Schema } from "effect";
 const gitUrlPattern = /^(https?:\/\/|git@|git:\/\/|ssh:\/\/).+/;
 
 const TimeoutInput = Schema.Number.pipe(Schema.nonNegative());
+const NonEmptyStringArray = Schema.Array(Schema.String.pipe(Schema.minLength(1))).pipe(
+  Schema.filter((items) => items.length > 0 || "Provide at least one value"),
+);
 
 export const GitInstall = Schema.Struct({
   source: Schema.Literal("git"),
@@ -46,11 +49,32 @@ export const SymlinkInstall = Schema.Struct({
 
 export type SymlinkInstall = Schema.Schema.Type<typeof SymlinkInstall>;
 
+export const SkillsInstall = Schema.Struct({
+  source: Schema.Literal("skills"),
+  package: Schema.String.pipe(Schema.minLength(1)),
+  repo: Schema.String.pipe(Schema.minLength(1)),
+  ref: Schema.String.pipe(Schema.minLength(1)),
+  path: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+  skills: NonEmptyStringArray,
+  agents: NonEmptyStringArray,
+  mode: Schema.optional(Schema.Literal("copy", "symlink")),
+}).pipe(
+  Schema.filter((install) => {
+    const invalidSkill = install.skills.find((skill) => skill.includes("/"));
+    return (
+      invalidSkill === undefined || `Skill names must not include path separators: ${invalidSkill}`
+    );
+  }),
+);
+
+export type SkillsInstall = Schema.Schema.Type<typeof SkillsInstall>;
+
 export const InstallStrategy = Schema.Union(
   GitInstall,
   BrewInstall,
   DirInstall,
   SymlinkInstall,
+  SkillsInstall,
   Schema.String.pipe(Schema.minLength(1)),
 );
 
@@ -59,7 +83,7 @@ export type TimeoutInput = Schema.Schema.Type<typeof TimeoutInput>;
 
 export const SystemItem = Schema.Struct({
   name: Schema.String,
-  check: Schema.String,
+  check: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   onCheck: Schema.optional(Schema.Literal("exit-code", "path-exists")),
   install: InstallStrategy,
   update: Schema.optional(Schema.String),
@@ -68,7 +92,21 @@ export const SystemItem = Schema.Struct({
   backup: Schema.optional(Schema.String),
   tags: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(TimeoutInput),
-});
+}).pipe(
+  Schema.filter((item) => {
+    if (item.check !== undefined) {
+      return true;
+    }
+
+    return (
+      (typeof item.install === "object" &&
+        (item.install.source === "dir" ||
+          item.install.source === "symlink" ||
+          item.install.source === "skills")) ||
+      "Provide check for shell, brew, and git install sources"
+    );
+  }),
+);
 
 export type SystemItem = Schema.Schema.Type<typeof SystemItem>;
 

@@ -7,6 +7,7 @@ import type {
   BrewInstall,
   DirInstall,
   SymlinkInstall,
+  SkillsInstall,
   TimeoutInput as ItemTimeoutInput,
 } from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
@@ -97,6 +98,9 @@ const isDirInstall = (install: SystemItem["install"]): install is DirInstall =>
 const isSymlinkInstall = (install: SystemItem["install"]): install is SymlinkInstall =>
   typeof install === "object" && install.source === "symlink";
 
+const isSkillsInstall = (install: SystemItem["install"]): install is SkillsInstall =>
+  typeof install === "object" && install.source === "skills";
+
 const formatCommand = (command: string, args: readonly string[] = []): string =>
   args.length > 0 ? `${command} ${args.join(" ")}` : command;
 
@@ -122,6 +126,91 @@ const getSymlinkTargetForCreate = (target: string): string => {
     ? Path.normalize(Path.resolve(expandedTarget))
     : Path.normalize(target);
 };
+
+const GLOBAL_SKILLS_PATH_BY_AGENT = new Map<string, string>([
+  ["adal", "~/.adal/skills"],
+  ["amp", "~/.config/agents/skills"],
+  ["antigravity", "~/.gemini/antigravity/skills"],
+  ["augment", "~/.augment/skills"],
+  ["bob", "~/.bob/skills"],
+  ["claude-code", "~/.claude/skills"],
+  ["cline", "~/.agents/skills"],
+  ["codebuddy", "~/.codebuddy/skills"],
+  ["codex", "~/.codex/skills"],
+  ["command-code", "~/.commandcode/skills"],
+  ["continue", "~/.continue/skills"],
+  ["cortex", "~/.snowflake/cortex/skills"],
+  ["crush", "~/.config/crush/skills"],
+  ["cursor", "~/.cursor/skills"],
+  ["deepagents", "~/.deepagents/agent/skills"],
+  ["droid", "~/.factory/skills"],
+  ["firebender", "~/.firebender/skills"],
+  ["gemini-cli", "~/.gemini/skills"],
+  ["github-copilot", "~/.copilot/skills"],
+  ["goose", "~/.config/goose/skills"],
+  ["iflow-cli", "~/.iflow/skills"],
+  ["junie", "~/.junie/skills"],
+  ["kilo", "~/.kilocode/skills"],
+  ["kimi-cli", "~/.config/agents/skills"],
+  ["kiro-cli", "~/.kiro/skills"],
+  ["kode", "~/.kode/skills"],
+  ["mcpjam", "~/.mcpjam/skills"],
+  ["mistral-vibe", "~/.vibe/skills"],
+  ["mux", "~/.mux/skills"],
+  ["neovate", "~/.neovate/skills"],
+  ["openclaw", "~/.openclaw/skills"],
+  ["opencode", "~/.config/opencode/skills"],
+  ["openhands", "~/.openhands/skills"],
+  ["pi", "~/.pi/agent/skills"],
+  ["pochi", "~/.pochi/skills"],
+  ["qoder", "~/.qoder/skills"],
+  ["qwen-code", "~/.qwen/skills"],
+  ["replit", "~/.config/agents/skills"],
+  ["roo", "~/.roo/skills"],
+  ["trae", "~/.trae/skills"],
+  ["trae-cn", "~/.trae-cn/skills"],
+  ["universal", "~/.config/agents/skills"],
+  ["warp", "~/.agents/skills"],
+  ["windsurf", "~/.codeium/windsurf/skills"],
+  ["zencoder", "~/.zencoder/skills"],
+]);
+
+const getGlobalSkillsRoot = (agent: string): string | undefined =>
+  GLOBAL_SKILLS_PATH_BY_AGENT.get(agent);
+
+const getSkillPath = (agent: string, skill: string): string | undefined => {
+  const root = getGlobalSkillsRoot(agent);
+  return root === undefined ? undefined : normalizeManagedPath(Path.join(root, skill, "SKILL.md"));
+};
+
+const getSkillsSourceRef = (install: SkillsInstall): string => {
+  const repo = install.repo.replace(/\/$/, "").replace(/\.git$/, "");
+  const path = install.path === undefined ? "" : `/${install.path.replace(/^\/|\/$/g, "")}`;
+  const githubMatch = /^(?:https:\/\/github\.com\/)?([^/\s]+\/[^/\s]+)$/.exec(repo);
+
+  if (githubMatch) {
+    return `https://github.com/${githubMatch[1]}/tree/${install.ref}${path}`;
+  }
+
+  return `${repo}/tree/${install.ref}${path}`;
+};
+
+const getSkillsAddArgs = (install: SkillsInstall): readonly string[] => [
+  "DISABLE_TELEMETRY=1",
+  "npx",
+  "--yes",
+  install.package,
+  "add",
+  getSkillsSourceRef(install),
+  ...install.skills.flatMap((skill) => ["--skill", skill]),
+  ...install.agents.flatMap((agent) => ["--agent", agent]),
+  "--global",
+  ...(install.mode === "symlink" ? [] : ["--copy"]),
+  "--yes",
+];
+
+const getSkillsAddCommand = (install: SkillsInstall): string =>
+  formatCommand("env", getSkillsAddArgs(install));
 
 const describePathType = (type: string): string => {
   switch (type) {
@@ -164,7 +253,16 @@ const getCheckDescription = (item: SystemItem): string => {
     return `${getSymlinkLinkPath(item.install)} -> ${getSymlinkDisplayTarget(item.install)}`;
   }
 
-  return item.check;
+  if (isSkillsInstall(item.install)) {
+    const install = item.install;
+    return install.agents
+      .flatMap((agent) =>
+        install.skills.map((skill) => getSkillPath(agent, skill) ?? `${agent}:${skill}`),
+      )
+      .join(", ");
+  }
+
+  return item.check ?? "";
 };
 
 type ItemCheckResult =
@@ -235,6 +333,10 @@ const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string
     return [formatCommand("git", cloneArgs)];
   }
 
+  if (isSkillsInstall(install)) {
+    return [getSkillsAddCommand(install)];
+  }
+
   return [];
 };
 
@@ -258,7 +360,7 @@ const getManagedUpdatePreview = (install: SymlinkInstall): ExecutionPreview => (
 });
 
 const getExecutionDetail = (install: SystemItem["install"]): string | undefined => {
-  if (isDirInstall(install) || isSymlinkInstall(install)) {
+  if (isDirInstall(install) || isSymlinkInstall(install) || isSkillsInstall(install)) {
     return getInstallPreviewSteps(install)[0];
   }
 
@@ -324,20 +426,56 @@ const checkGenericItem = (
   shell: ShellService,
 ): Effect.Effect<boolean, ShellError, FileSystem.FileSystem> => {
   const checkMode = item.onCheck ?? "exit-code";
+  const check = item.check ?? "";
 
   if (checkMode === "path-exists") {
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const expandedPath = expandPath(item.check);
+      const expandedPath = expandPath(check);
       return yield* fs.exists(expandedPath).pipe(Effect.catchAll(() => Effect.succeed(false)));
     });
   }
 
-  return shell.run(item.check, toTimeoutOptions(item.timeout)).pipe(
+  return shell.run(check, toTimeoutOptions(item.timeout)).pipe(
     Effect.map(() => true),
     Effect.catchAll((error) => (error.timedOut ? Effect.fail(error) : Effect.succeed(false))),
   );
 };
+
+const checkSkillsInstall = (
+  install: SkillsInstall,
+): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+
+    for (const agent of install.agents) {
+      if (getGlobalSkillsRoot(agent) === undefined) {
+        return yield* Effect.fail(
+          toFileSystemInstallError(
+            agent,
+            `Unsupported skills agent "${agent}". Add its global skills path before using it in a skills install source.`,
+          ),
+        );
+      }
+
+      for (const skill of install.skills) {
+        const skillPath = getSkillPath(agent, skill)!;
+        const exists = yield* fs
+          .exists(skillPath)
+          .pipe(
+            Effect.mapError(
+              mapFileSystemError(skillPath, `Failed to inspect installed skill "${skill}"`),
+            ),
+          );
+
+        if (!exists) {
+          return { type: "missing" };
+        }
+      }
+    }
+
+    return { type: "installed" };
+  });
 
 const checkDirInstall = (
   install: DirInstall,
@@ -477,6 +615,10 @@ const checkItem = (
     return checkSymlinkInstall(item.install);
   }
 
+  if (isSkillsInstall(item.install)) {
+    return checkSkillsInstall(item.install);
+  }
+
   return checkGenericItem(item, shell).pipe(
     Effect.map((isInstalled) => (isInstalled ? { type: "installed" } : { type: "missing" })),
   );
@@ -559,6 +701,13 @@ const installItem = (
 
   if (isSymlinkInstall(item.install)) {
     return createSymlink(item.install, fs);
+  }
+
+  if (isSkillsInstall(item.install)) {
+    return shell.exec("env", getSkillsAddArgs(item.install), toTimeoutOptions(item.timeout)).pipe(
+      Effect.tap((result) => Effect.sync(() => emitCommandOutput(item.name, result, options))),
+      Effect.asVoid,
+    );
   }
 
   return runShellCommand(item.name, item.install, shell, item.timeout, options).pipe(Effect.asVoid);
@@ -650,7 +799,11 @@ const executeItem = (
     const brew = yield* BrewService;
     const fs = yield* FileSystem.FileSystem;
 
-    const effectiveGroup = isBrewInstall(item.install) ? (item.group ?? "brew") : item.group;
+    const effectiveGroup = isBrewInstall(item.install)
+      ? (item.group ?? "brew")
+      : isSkillsInstall(item.install)
+        ? (item.group ?? "skills")
+        : item.group;
 
     // Acquire group lock atomically
     const lock = yield* acquireGroupLock(effectiveGroup, groupLocks);

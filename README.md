@@ -137,7 +137,7 @@ Remote configs are review-first:
 - `system-setup gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
 - preview output shows the source, the selected items, and the install or update steps that would run
 - preview output also echoes any active GitHub commit pin or SHA-256 integrity check
-- preview output makes shell install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, and `symlink`
+- preview output makes shell install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, `symlink`, and `skills`
 - `system-setup --apply https://example.com/system-config.json` is the explicit opt-in to execute a remote config
 - `system-setup --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
 
@@ -174,7 +174,7 @@ system-setup --apply gh:owner/repo/path/to/config.json
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier for the item |
-| `check` | Yes | Command or path to verify installation |
+| `check` | Usually | Command or path to verify installation; optional for managed `dir`, `symlink`, and `skills` sources |
 | `install` | Yes | Shell command or structured install source |
 | `onCheck` | No | Detection strategy: `"exit-code"` (default) or `"path-exists"` |
 | `update` | No | Command to update the item; `symlink` sources also use `--update` to replace incorrect existing paths |
@@ -259,6 +259,26 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
   }
 }
 ```
+
+**Skills source (preferred for agent skills)**:
+```json
+{
+  "name": "agent-skills",
+  "install": {
+    "source": "skills",
+    "package": "skills@1.5.1",
+    "repo": "vercel-labs/agent-skills",
+    "ref": "0123456789abcdef0123456789abcdef01234567",
+    "skills": ["frontend-design", "skill-creator"],
+    "agents": ["codex", "opencode"],
+    "mode": "copy"
+  },
+  "dependsOn": ["nodejs"],
+  "tags": ["ai", "skills"]
+}
+```
+
+For `skills` items, `check` can be omitted. `system-setup` derives global skill paths for supported agents, such as `~/.codex/skills/<skill>/SKILL.md` for Codex and `~/.config/opencode/skills/<skill>/SKILL.md` for OpenCode. Skills installs run through `env DISABLE_TELEMETRY=1 npx --yes <package> add ... --global --yes`, repeat `--skill` and `--agent` for every configured value, and default to the serial `skills` group unless you set `group` yourself. `mode` defaults to `copy`; set `"mode": "symlink"` to omit the CLI's `--copy` flag.
 
 **Shell command (escape hatch)**:
 ```json

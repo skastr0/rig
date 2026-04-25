@@ -95,6 +95,35 @@ const makeSymlinkItem = (
   backup: opts?.backup,
 });
 
+const makeSkillsItem = (
+  name: string,
+  opts?: {
+    package?: string;
+    repo?: string;
+    ref?: string;
+    path?: string;
+    skills?: string[];
+    agents?: string[];
+    mode?: "copy" | "symlink";
+    group?: string;
+    timeout?: number;
+  },
+): SystemItem => ({
+  name,
+  install: {
+    source: "skills",
+    package: opts?.package ?? "skills@1.5.1",
+    repo: opts?.repo ?? "vercel-labs/agent-skills",
+    ref: opts?.ref ?? "0123456789abcdef0123456789abcdef01234567",
+    path: opts?.path,
+    skills: opts?.skills ?? ["frontend-design"],
+    agents: opts?.agents ?? ["codex"],
+    mode: opts?.mode,
+  },
+  group: opts?.group,
+  timeout: opts?.timeout,
+});
+
 type MockFsNode =
   | { type: "Directory" }
   | { type: "File" }
@@ -1119,6 +1148,220 @@ describe("Executor", () => {
         type: "SymbolicLink",
         target: normalizeTestPath("~/.dotfiles/.zshrc"),
       });
+    });
+  });
+
+  describe("skills install strategy", () => {
+    it("skips when all requested skills exist for all requested agents", async () => {
+      const fileSystem = createMockFileSystem({
+        "~/.codex/skills/frontend-design/SKILL.md": { type: "File" },
+        "~/.codex/skills/skill-creator/SKILL.md": { type: "File" },
+        "~/.config/opencode/skills/frontend-design/SKILL.md": { type: "File" },
+        "~/.config/opencode/skills/skill-creator/SKILL.md": { type: "File" },
+      });
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeSkillsItem("agent-skills", {
+            skills: ["frontend-design", "skill-creator"],
+            agents: ["codex", "opencode"],
+          }),
+        ]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "agent-skills",
+          action: "skipped",
+          status: "installed",
+        }),
+      ]);
+    });
+
+    it("installs missing skills with telemetry disabled and repeated skill and agent flags", async () => {
+      const execCalls: Array<{
+        command: string;
+        args: readonly string[];
+        timeout?: unknown;
+      }> = [];
+      const fileSystem = createMockFileSystem();
+      const shell: ShellService = {
+        run: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: (command, args, options) =>
+          Effect.sync(() => {
+            execCalls.push({ command, args, timeout: options?.timeout });
+            return { stdout: "installed", stderr: "", exitCode: 0 };
+          }),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeSkillsItem("agent-skills", {
+            repo: "https://github.com/vercel-labs/agent-skills",
+            path: "skills",
+            skills: ["frontend-design", "skill-creator"],
+            agents: ["codex", "opencode"],
+            timeout: 12_345,
+          }),
+        ]),
+      );
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, fileSystem),
+        ExecutorLive,
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "agent-skills",
+          action: "installed",
+          status: "installed",
+        }),
+      ]);
+      expect(execCalls).toEqual([
+        {
+          command: "env",
+          args: [
+            "DISABLE_TELEMETRY=1",
+            "npx",
+            "--yes",
+            "skills@1.5.1",
+            "add",
+            "https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567/skills",
+            "--skill",
+            "frontend-design",
+            "--skill",
+            "skill-creator",
+            "--agent",
+            "codex",
+            "--agent",
+            "opencode",
+            "--global",
+            "--copy",
+            "--yes",
+          ],
+          timeout: 12_345,
+        },
+      ]);
+    });
+
+    it("emits clear dry-run output for skills installation", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeSkillsItem("agent-skills", {
+            skills: ["frontend-design"],
+            agents: ["codex"],
+          }),
+        ]),
+      );
+      const verboseMessages: string[] = [];
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            dryRun: true,
+            verbose: true,
+            onVerbose: (message) => verboseMessages.push(message),
+          });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "agent-skills",
+          action: "skipped",
+          status: "missing",
+          preview: {
+            label: "structured install (skills)",
+            steps: [
+              "env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567 --skill frontend-design --agent codex --global --copy --yes",
+            ],
+          },
+        }),
+      ]);
+      expect(verboseMessages).toContain(
+        "[agent-skills] would install: env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567 --skill frontend-design --agent codex --global --copy --yes",
+      );
+    });
+
+    it("serializes skills source items without explicit group", async () => {
+      let activeInstalls = 0;
+      let maxConcurrentInstalls = 0;
+      const fileSystem = createMockFileSystem();
+      const shell: ShellService = {
+        run: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: () =>
+          Effect.gen(function* () {
+            activeInstalls += 1;
+            maxConcurrentInstalls = Math.max(maxConcurrentInstalls, activeInstalls);
+            yield* Effect.sleep("50 millis");
+            activeInstalls -= 1;
+            return { stdout: "", stderr: "", exitCode: 0 };
+          }),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeSkillsItem("agent-skills-a", { skills: ["frontend-design"] }),
+          makeSkillsItem("agent-skills-b", { skills: ["skill-creator"] }),
+        ]),
+      );
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, fileSystem),
+        ExecutorLive,
+      );
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(maxConcurrentInstalls).toBe(1);
+    });
+
+    it("fails with an actionable error for unsupported skills agents", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSkillsItem("agent-skills", { agents: ["unknown-agent"] })]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "agent-skills",
+          action: "failed",
+          status: "error",
+        }),
+      );
+      expect(results[0].error).toContain('Unsupported skills agent "unknown-agent"');
     });
   });
 

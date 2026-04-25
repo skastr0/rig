@@ -28,9 +28,9 @@ A declarative, idempotent macOS system configuration tool built with Effect and 
 ```typescript
 type SystemItem = {
   name: string              // Unique identifier
-  check: string             // Command or path to verify installation
+  check?: string            // Command or path to verify installation; optional for managed sources
   onCheck?: "exit-code" | "path-exists"  // Detection strategy
-  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall
+  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall | SkillsInstall
   update?: string           // Optional update command
   group?: string            // Serial execution group
   dependsOn?: string[]      // Dependency ordering
@@ -48,12 +48,14 @@ type SystemItem = {
 - `{ source: "git", ... }` for clones and sparse checkouts
 - `{ source: "dir", path }` for directory creation
 - `{ source: "symlink", path, target }` for managed symlinks
+- `{ source: "skills", ... }` for Vercel Skills CLI installs across one or more agents
 
 **Rationale**:
 - Shell commands still cover edge cases
 - Brew installs need safe serialization and clearer config
 - Git clones need structured handling for sparse checkout, branch selection, and path expansion
 - Directory and symlink items encode simple filesystem intent directly instead of wrapping shell commands
+- Skills installs need reproducible `npx skills add` invocations, derived checks, telemetry suppression, and serialized writes to agent skill directories
 - Keeps the schema small while making the common cases explicit
 
 ### ADR-003: Group-Based Serial Execution
@@ -86,7 +88,7 @@ type SystemItem = {
 - `exit-code` (default): Run command; exit 0 = installed
 - `path-exists`: Check if path exists
 
-Structured `dir` and `symlink` install sources also perform install-specific filesystem checks so they can detect conflicts and symlink drift explicitly.
+Structured `dir`, `symlink`, and `skills` install sources also perform install-specific filesystem checks so they can detect conflicts, symlink drift, and already-installed agent skills explicitly.
 
 **Rationale**:
 - User controls detection logic

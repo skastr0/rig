@@ -2,10 +2,18 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Schema } from "effect";
 import { renderStarterConfig } from "../starterConfig.js";
-import { BrewInstall, DirInstall, SymlinkInstall, SystemConfig, SystemItem } from "./config.js";
+import {
+  BrewInstall,
+  DirInstall,
+  SkillsInstall,
+  SymlinkInstall,
+  SystemConfig,
+  SystemItem,
+} from "./config.js";
 
 const decodeBrewInstall = Schema.decodeUnknown(BrewInstall);
 const decodeDirInstall = Schema.decodeUnknown(DirInstall);
+const decodeSkillsInstall = Schema.decodeUnknown(SkillsInstall);
 const decodeSymlinkInstall = Schema.decodeUnknown(SymlinkInstall);
 const decodeSystemConfig = Schema.decodeUnknown(SystemConfig);
 const decodeSystemItem = Schema.decodeUnknown(SystemItem);
@@ -87,6 +95,58 @@ describe("config schema", () => {
     });
   });
 
+  it("accepts skills installs with multiple skills and agents", async () => {
+    const parsed = await Effect.runPromise(
+      decodeSkillsInstall({
+        source: "skills",
+        package: "skills@1.5.1",
+        repo: "vercel-labs/agent-skills",
+        ref: "0123456789abcdef0123456789abcdef01234567",
+        skills: ["frontend-design", "skill-creator"],
+        agents: ["codex", "opencode"],
+        mode: "copy",
+      }),
+    );
+
+    expect(parsed).toEqual({
+      source: "skills",
+      package: "skills@1.5.1",
+      repo: "vercel-labs/agent-skills",
+      ref: "0123456789abcdef0123456789abcdef01234567",
+      skills: ["frontend-design", "skill-creator"],
+      agents: ["codex", "opencode"],
+      mode: "copy",
+    });
+  });
+
+  it("allows managed skills installs to omit check", async () => {
+    const parsed = await Effect.runPromise(
+      decodeSystemItem({
+        name: "agent-skills",
+        install: {
+          source: "skills",
+          package: "skills@1.5.1",
+          repo: "vercel-labs/agent-skills",
+          ref: "0123456789abcdef0123456789abcdef01234567",
+          skills: ["frontend-design"],
+          agents: ["codex"],
+        },
+      }),
+    );
+
+    expect(parsed).toEqual({
+      name: "agent-skills",
+      install: {
+        source: "skills",
+        package: "skills@1.5.1",
+        repo: "vercel-labs/agent-skills",
+        ref: "0123456789abcdef0123456789abcdef01234567",
+        skills: ["frontend-design"],
+        agents: ["codex"],
+      },
+    });
+  });
+
   it("accepts per-item timeout values", async () => {
     const parsed = await Effect.runPromise(
       decodeSystemItem({
@@ -138,6 +198,32 @@ describe("config schema", () => {
         source: "brew",
         formula: "x",
         cask: "y",
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("rejects unmanaged installs without check", async () => {
+    const exit = await Effect.runPromiseExit(
+      decodeSystemItem({
+        name: "neovim",
+        install: "brew install neovim",
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("rejects skills installs without skills or agents", async () => {
+    const exit = await Effect.runPromiseExit(
+      decodeSkillsInstall({
+        source: "skills",
+        package: "skills@1.5.1",
+        repo: "vercel-labs/agent-skills",
+        ref: "0123456789abcdef0123456789abcdef01234567",
+        skills: [],
+        agents: [],
       }),
     );
 
