@@ -4,3 +4,4 @@ dist/
 .DS_Store
 beads-issues-backup-*.jsonl
 temp_git_research/
+.cmap/
