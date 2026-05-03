@@ -184,15 +184,11 @@ const getSkillPath = (agent: string, skill: string): string | undefined => {
 };
 
 const getSkillsSourceRef = (install: SkillsInstall): string => {
-  const repo = install.repo.replace(/\/$/, "").replace(/\.git$/, "");
-  const path = install.path === undefined ? "" : `/${install.path.replace(/^\/|\/$/g, "")}`;
-  const githubMatch = /^(?:https:\/\/github\.com\/)?([^/\s]+\/[^/\s]+)$/.exec(repo);
-
-  if (githubMatch) {
-    return `https://github.com/${githubMatch[1]}/tree/${install.ref}${path}`;
-  }
-
-  return `${repo}/tree/${install.ref}${path}`;
+  // npx skills add accepts org/repo or https://github.com/org/repo
+  // It does NOT accept /tree/<sha> for commit pinning — that format
+  // makes git try --branch <sha> which fails for commit hashes.
+  // Just pass the repo directly; the skills CLI resolves it correctly.
+  return install.repo;
 };
 
 const getSkillsAddArgs = (install: SkillsInstall): readonly string[] => [

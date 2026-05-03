@@ -1242,7 +1242,7 @@ describe("Executor", () => {
             "--yes",
             "skills@1.5.1",
             "add",
-            "https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567/skills",
+            "https://github.com/vercel-labs/agent-skills",
             "--skill",
             "frontend-design",
             "--skill",
@@ -1291,13 +1291,13 @@ describe("Executor", () => {
           preview: {
             label: "structured install (skills)",
             steps: [
-              "env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567 --skill frontend-design --agent codex --global --copy --yes",
+              "env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add vercel-labs/agent-skills --skill frontend-design --agent codex --global --copy --yes",
             ],
           },
         }),
       ]);
       expect(verboseMessages).toContain(
-        "[agent-skills] would install: env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add https://github.com/vercel-labs/agent-skills/tree/0123456789abcdef0123456789abcdef01234567 --skill frontend-design --agent codex --global --copy --yes",
+        "[agent-skills] would install: env DISABLE_TELEMETRY=1 npx --yes skills@1.5.1 add vercel-labs/agent-skills --skill frontend-design --agent codex --global --copy --yes",
       );
     });
 
