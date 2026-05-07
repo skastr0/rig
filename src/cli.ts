@@ -117,7 +117,7 @@ const resolveConfigInput = (
 };
 
 export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
-  Command.make("system-setup", cliOptions, (opts) =>
+  Command.make("rig", cliOptions, (opts) =>
     handler({
       config: resolveConfigInput(opts.source, opts.config),
       profile: Option.getOrUndefined(opts.profile),
@@ -140,22 +140,22 @@ for existence before installing. Use --dry-run to preview local changes.
 Remote HTTPS configs and GitHub shorthand preview by default and require --apply to execute.
 
 Quick Start:
-  system-setup --init                                         # Create ./system-config.json
-  system-setup --init ./work-config.json                      # Create a starter config at a custom path
-  system-setup --dry-run                                      # Preview a local config
-  system-setup                                                # Apply ./system-config.json
-  system-setup https://example.com/system-config.json         # Preview a remote config
-  system-setup gh:user/repo                                   # Preview repo-root ${defaultGitHubConfigPath} from GitHub
-  system-setup gh:user/repo@<40-char-commit>                  # Preview a pinned GitHub config
-  system-setup 'https://example.com/system-config.json#sha256=<digest>'
+  rig --init                                         # Create ./system-config.json
+  rig --init ./work-config.json                      # Create a starter config at a custom path
+  rig --dry-run                                      # Preview a local config
+  rig                                                # Apply ./system-config.json
+  rig https://example.com/system-config.json         # Preview a remote config
+  rig gh:user/repo                                   # Preview repo-root ${defaultGitHubConfigPath} from GitHub
+  rig gh:user/repo@<40-char-commit>                  # Preview a pinned GitHub config
+  rig 'https://example.com/system-config.json#sha256=<digest>'
                                                             # Preview with integrity verification
-  system-setup --apply https://example.com/system-config.json # Apply a remote config
-  system-setup --apply gh:user/repo                           # Apply a GitHub shorthand config
-  system-setup -p work                                        # Apply with 'work' profile
-  system-setup -t dev -t editor                               # Install items with dev OR editor tags
-  system-setup --status                                       # Inspect current item status without mutating
-  system-setup --why neovim                                   # Explain why 'neovim' is selected
-  system-setup --update                                       # Update installed items
+  rig --apply https://example.com/system-config.json # Apply a remote config
+  rig --apply gh:user/repo                           # Apply a GitHub shorthand config
+  rig -p work                                        # Apply with 'work' profile
+  rig -t dev -t editor                               # Install items with dev OR editor tags
+  rig --status                                       # Inspect current item status without mutating
+  rig --why neovim                                   # Explain why 'neovim' is selected
+  rig --update                                       # Update installed items
 
 Docs: See USAGE.md for examples and patterns`,
     ),
@@ -163,6 +163,6 @@ Docs: See USAGE.md for examples and patterns`,
 
 export const runCli = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
   Command.run(makeCommand(handler), {
-    name: "system-setup",
+    name: "rig",
     version: "0.1.0",
   });

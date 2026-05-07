@@ -1,5 +1,5 @@
 {
-  "name": "system-setup",
+  "name": "@skastr0/rig",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

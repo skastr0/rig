@@ -1,4 +1,4 @@
-# System Setup - AI Agent Instructions
+# Rig - AI Agent Instructions
 
 ## ⛔️ VALIDATION IS MANDATORY - NO EXCEPTIONS ⛔️
 

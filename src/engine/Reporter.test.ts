@@ -49,7 +49,7 @@ describe("Reporter", () => {
     it("should show the canonical raw GitHub URL for shorthand sources", async () => {
       const reporter = createReporter({ noColor: true });
       const source = await Effect.runPromise(
-        resolveConfigSource("gh:guilhermecastro/system-setup/configs/work.json"),
+        resolveConfigSource("gh:guilhermecastro/rig/configs/work.json"),
       );
 
       reporter.printConfigSource(source);
@@ -57,7 +57,7 @@ describe("Reporter", () => {
       expect(
         output.some((line) =>
           line.includes(
-            "remote HTTPS https://raw.githubusercontent.com/guilhermecastro/system-setup/HEAD/configs/work.json",
+            "remote HTTPS https://raw.githubusercontent.com/guilhermecastro/rig/HEAD/configs/work.json",
           ),
         ),
       ).toBe(true);
@@ -87,7 +87,7 @@ describe("Reporter", () => {
 
       reporter.printConfigSource({
         _tag: "https",
-        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         pin: {
           provider: "github",
           ref: pinnedCommit,

@@ -18,10 +18,10 @@ console.log("Cleaning dist directory...");
 rmSync(distDir, { recursive: true, force: true });
 mkdirSync(distDir, { recursive: true });
 
-console.log(`\nBuilding system-setup v${version}...\n`);
+console.log(`\nBuilding rig v${version}...\n`);
 
 for (const target of targets) {
-  const outfile = join(distDir, `system-setup-${target.platform}-${target.arch}`);
+  const outfile = join(distDir, `rig-${target.platform}-${target.arch}`);
   console.log(`Building ${target.platform}-${target.arch}...`);
   try {
     await compile(target, outfile);
@@ -41,5 +41,5 @@ To install locally (compiles for your host directly — does not require this bu
   bun run install:local
 
 To test:
-  ./${distDir}/system-setup-darwin-arm64 --help
+  ./${distDir}/rig-darwin-arm64 --help
 `);

@@ -1,4 +1,4 @@
-# System Setup - Architecture
+# Rig - Architecture
 
 A declarative, idempotent macOS system configuration tool built with Effect and Bun.
 
@@ -141,7 +141,7 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 **Context**: Dotfiles/configs may have local changes that shouldn't be lost.
 
 **Decision**: Items can specify `backup` path. Before install, the tool:
-1. Creates timestamped backup dir (e.g., `~/.system-setup-backups/2024-01-15T10-30-00/`)
+1. Creates timestamped backup dir (e.g., `~/.rig-backups/2024-01-15T10-30-00/`)
 2. Copies existing file/directory to backup
 3. Proceeds with install
 
@@ -210,7 +210,7 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 ## File Structure
 
 ```
-system-setup/
+rig/
 ├── src/
 │   ├── index.ts              # CLI entry (@effect/cli)
 │   ├── runtime.ts            # ManagedRuntime (single instance)

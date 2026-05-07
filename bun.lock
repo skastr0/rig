@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "system-setup",
+      "name": "@skastr0/rig",
       "dependencies": {
         "@effect/cli": "^0.72.1",
         "@effect/platform": "^0.93.6",

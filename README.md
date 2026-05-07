@@ -1,13 +1,13 @@
-# system-setup
+# rig
 
 A declarative, idempotent macOS/Linux system configuration tool built with Effect and Bun.
 
-Define your system configuration in JSON, and `system-setup` will install only what's missing.
+Define your system configuration in JSON, and `rig` will install only what's missing.
 
 ## Quick Start
 
 ```bash
-# Install (compiles for your host and writes to ~/.local/bin/system-setup)
+# Install (compiles for your host and writes to ~/.local/bin/rig)
 bun install && bun run install:local
 
 # Create a config file
@@ -27,28 +27,28 @@ cat > system-config.json << 'EOF'
 EOF
 
 # Preview what would be installed
-system-setup --dry-run
+rig --dry-run
 
 # Apply local configuration
-system-setup
+rig
 
 # Review a remote configuration first (default for HTTPS sources)
-system-setup https://example.com/system-config.json
+rig https://example.com/system-config.json
 
 # Review a GitHub-hosted configuration first
-system-setup gh:user/repo
+rig gh:user/repo
 
 # Review a pinned GitHub configuration
-system-setup gh:user/repo@0123456789abcdef0123456789abcdef01234567
+rig gh:user/repo@0123456789abcdef0123456789abcdef01234567
 
 # Review a remote config with recorded integrity
-system-setup 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+rig 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
 # Apply a reviewed remote configuration
-system-setup --apply https://example.com/system-config.json
+rig --apply https://example.com/system-config.json
 
 # Apply a reviewed GitHub shorthand configuration
-system-setup --apply gh:user/repo
+rig --apply gh:user/repo
 ```
 
 ## Installation
@@ -58,13 +58,13 @@ system-setup --apply gh:user/repo
 Requires [Bun](https://bun.sh) 1.0+.
 
 ```bash
-git clone https://github.com/USER/system-setup.git
-cd system-setup
+git clone https://github.com/USER/rig.git
+cd rig
 bun install
 bun run install:local
 ```
 
-`install:local` compiles a binary for your host platform straight into `~/.local/bin/system-setup` (and ad-hoc codesigns it on macOS). No separate build step needed.
+`install:local` compiles a binary for your host platform straight into `~/.local/bin/rig` (and ad-hoc codesigns it on macOS). No separate build step needed.
 
 ### Building Distribution Binaries
 
@@ -78,11 +78,11 @@ Use this when you want to upload binaries to a release or copy them to another m
 
 ## Configuration
 
-Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand. If you do not provide a source, `system-setup` defaults to `./system-config.json`. Remote sources must use HTTPS, whether you pass the final URL directly or let GitHub shorthand resolve it for you.
+Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand. If you do not provide a source, `rig` defaults to `./system-config.json`. Remote sources must use HTTPS, whether you pass the final URL directly or let GitHub shorthand resolve it for you.
 
 ### GitHub shorthand
 
-`system-setup` supports a narrow GitHub shorthand that resolves into the existing remote HTTPS loader:
+`rig` supports a narrow GitHub shorthand that resolves into the existing remote HTTPS loader:
 
 - `gh:owner/repo`
 - `gh:owner/repo/path/to/config.json`
@@ -119,11 +119,11 @@ That gives one narrow operator story for audited repeated runs:
 
 ```bash
 # Pin GitHub shorthand to a specific commit
-system-setup gh:owner/repo@0123456789abcdef0123456789abcdef01234567
+rig gh:owner/repo@0123456789abcdef0123456789abcdef01234567
 
 # Add integrity verification to any remote source
-system-setup 'gh:owner/repo@0123456789abcdef0123456789abcdef01234567#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-system-setup 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+rig 'gh:owner/repo@0123456789abcdef0123456789abcdef01234567#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+rig 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 ```
 
 Integrity mismatches fail closed and report both the expected and observed SHA-256 digests.
@@ -133,22 +133,22 @@ Integrity mismatches fail closed and report both the expected and observed SHA-2
 Local configs keep the existing contract: apply by default, preview with `--dry-run`.
 
 Remote configs are review-first:
-- `system-setup https://example.com/system-config.json` loads the remote config in a non-mutating preview mode
-- `system-setup gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
+- `rig https://example.com/system-config.json` loads the remote config in a non-mutating preview mode
+- `rig gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
 - preview output shows the source, the selected items, and the install or update steps that would run
 - preview output also echoes any active GitHub commit pin or SHA-256 integrity check
 - preview output makes shell install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, `symlink`, and `skills`
-- `system-setup --apply https://example.com/system-config.json` is the explicit opt-in to execute a remote config
-- `system-setup --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
+- `rig --apply https://example.com/system-config.json` is the explicit opt-in to execute a remote config
+- `rig --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
 
 ```bash
 # Review first
-system-setup https://example.com/system-config.json
-system-setup gh:owner/repo
+rig https://example.com/system-config.json
+rig gh:owner/repo
 
 # Then apply once you trust it
-system-setup --apply https://example.com/system-config.json
-system-setup --apply gh:owner/repo/path/to/config.json
+rig --apply https://example.com/system-config.json
+rig --apply gh:owner/repo/path/to/config.json
 ```
 
 ### Basic Structure
@@ -226,7 +226,7 @@ system-setup --apply gh:owner/repo/path/to/config.json
 }
 ```
 
-For `symlink` items, `--update` means: if `install.path` already exists but is not the desired symlink, system-setup replaces that existing path with the configured symlink. If `backup` is set, that path is backed up before replacement.
+For `symlink` items, `--update` means: if `install.path` already exists but is not the desired symlink, rig replaces that existing path with the configured symlink. If `backup` is set, that path is backed up before replacement.
 
 **Brew source (preferred for Homebrew)**:
 ```json
@@ -278,7 +278,7 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 }
 ```
 
-For `skills` items, `check` can be omitted. `system-setup` derives global skill paths for supported agents, such as `~/.codex/skills/<skill>/SKILL.md` for Codex and `~/.config/opencode/skills/<skill>/SKILL.md` for OpenCode. Skills installs run through `env DISABLE_TELEMETRY=1 npx --yes <package> add ... --global --yes`, repeat `--skill` and `--agent` for every configured value, and default to the serial `skills` group unless you set `group` yourself. `mode` defaults to `copy`; set `"mode": "symlink"` to omit the CLI's `--copy` flag.
+For `skills` items, `check` can be omitted. `rig` derives global skill paths for supported agents, such as `~/.codex/skills/<skill>/SKILL.md` for Codex and `~/.config/opencode/skills/<skill>/SKILL.md` for OpenCode. Skills installs run through `env DISABLE_TELEMETRY=1 npx --yes <package> add ... --global --yes`, repeat `--skill` and `--agent` for every configured value, and default to the serial `skills` group unless you set `group` yourself. `mode` defaults to `copy`; set `"mode": "symlink"` to omit the CLI's `--copy` flag.
 
 **Shell command (escape hatch)**:
 ```json
@@ -352,7 +352,7 @@ Different configurations for different machines:
 }
 ```
 
-Use with: `system-setup --profile work`
+Use with: `rig --profile work`
 
 ### Backups
 
@@ -368,7 +368,7 @@ Automatically backup files before overwriting:
 }
 ```
 
-Backups are saved to `~/.system-setup-backups/<timestamp>/`.
+Backups are saved to `~/.rig-backups/<timestamp>/`.
 
 ### Tags
 
@@ -384,14 +384,14 @@ Filter items by tags:
 ```
 
 ```bash
-system-setup --tags editor        # Only items with "editor" tag
-system-setup --tags dev --tags editor  # Items with "dev" OR "editor"
+rig --tags editor        # Only items with "editor" tag
+rig --tags dev --tags editor  # Items with "dev" OR "editor"
 ```
 
 ## CLI Options
 
 ```
-system-setup [options] [config-source]
+rig [options] [config-source]
 
 Options:
   -c, --config <source> Path to a local config file or HTTPS config URL (default: ./system-config.json)
@@ -410,28 +410,28 @@ Options:
 
 ```bash
 # Use a custom local config
-system-setup ~/my-config.json
+rig ~/my-config.json
 
 # Use an explicit config flag
-system-setup --config ~/my-config.json
+rig --config ~/my-config.json
 
 # Review a remote config first
-system-setup https://example.com/system-config.json
+rig https://example.com/system-config.json
 
 # Apply a remote config after review
-system-setup --apply https://example.com/system-config.json
+rig --apply https://example.com/system-config.json
 
 # Force preview for a remote config explicitly
-system-setup --dry-run https://example.com/system-config.json
+rig --dry-run https://example.com/system-config.json
 
 # Apply work profile
-system-setup --profile work
+rig --profile work
 
 # Install specific items
-system-setup --only neovim --only ripgrep
+rig --only neovim --only ripgrep
 
 # Install by tags
-system-setup --tags dev
+rig --tags dev
 ```
 
 ## How It Works

@@ -18,7 +18,7 @@ export interface BackupService {
 
 export const BackupService = Context.GenericTag<BackupService>("BackupService");
 
-const BACKUP_DIR = Path.join(Os.homedir(), ".system-setup-backups");
+const BACKUP_DIR = Path.join(Os.homedir(), ".rig-backups");
 
 const expandPath = (path: string): string =>
   path.startsWith("~/") ? path.replace("~", Os.homedir()) : path;

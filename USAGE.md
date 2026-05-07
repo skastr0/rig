@@ -1,6 +1,6 @@
-# system-setup Usage Guide
+# rig Usage Guide
 
-This guide covers common patterns and real-world examples for configuring your system with `system-setup`.
+This guide covers common patterns and real-world examples for configuring your system with `rig`.
 
 ## Table of Contents
 
@@ -36,10 +36,10 @@ Run:
 
 ```bash
 # See what would be installed
-system-setup --dry-run
+rig --dry-run
 
 # Actually install
-system-setup
+rig
 ```
 
 ### Understanding the Output
@@ -158,9 +158,9 @@ Use tags to organize optional components:
 ```
 
 ```bash
-system-setup --tags essential      # Only essential items
-system-setup --tags editor         # All editors
-system-setup --tags devops         # DevOps tools
+rig --tags essential      # Only essential items
+rig --tags editor         # All editors
+rig --tags devops         # DevOps tools
 ```
 
 ## Package Manager Examples
@@ -589,13 +589,13 @@ Usage:
 
 ```bash
 # On work machine
-system-setup --profile work
+rig --profile work
 
 # On personal machine
-system-setup --profile personal
+rig --profile personal
 
 # Just the essentials on any machine
-system-setup --tags essential
+rig --tags essential
 ```
 
 ### Desktop vs Laptop
@@ -657,7 +657,7 @@ Store your config in a repo and pull updates:
 Then run with:
 
 ```bash
-system-setup -c ~/.system-config/system-config.json
+rig -c ~/.system-config/system-config.json
 ```
 
 ### Checking Service Status
@@ -730,7 +730,7 @@ system-setup -c ~/.system-config/system-config.json
 Use `--dry-run` to see what would happen without making changes:
 
 ```bash
-system-setup --dry-run
+rig --dry-run
 ```
 
 ### Check Individual Items
@@ -738,7 +738,7 @@ system-setup --dry-run
 Test a specific item:
 
 ```bash
-system-setup --only neovim --dry-run
+rig --only neovim --dry-run
 ```
 
 ### Common Issues
@@ -785,7 +785,7 @@ Check that `dependsOn` references valid item names:
 ### Getting Help
 
 ```bash
-system-setup --help
+rig --help
 ```
 
 Check the [README](./README.md) for CLI options and [ARCHITECTURE.md](./ARCHITECTURE.md) for design details.

@@ -210,7 +210,7 @@ describe("ConfigService", () => {
     const result = await Effect.runPromise(
       loadConfig({
         _tag: "https",
-        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         pin: {
           provider: "github",
           ref: pinnedCommit,
@@ -223,7 +223,7 @@ describe("ConfigService", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+      `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(result.items).toEqual([{ name: "fd", check: "which fd", install: "brew install fd" }]);
@@ -289,7 +289,7 @@ describe("ConfigService", () => {
     await expectConfigError(
       loadConfig({
         _tag: "https",
-        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         pin: {
           provider: "github",
           ref: pinnedCommit,
@@ -300,7 +300,7 @@ describe("ConfigService", () => {
           `Pinned remote config could not be resolved: expected GitHub commit ${pinnedCommit}, observed HTTP 404 Not Found`,
         );
         expect(error.path).toBe(
-          `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+          `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         );
       },
     );
@@ -317,7 +317,7 @@ describe("ConfigService", () => {
     await expectConfigError(
       loadConfig({
         _tag: "https",
-        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${malformedPinnedCommit}/system-config.json`,
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/${malformedPinnedCommit}/system-config.json`,
         pin: {
           provider: "github",
           ref: malformedPinnedCommit,
@@ -328,7 +328,7 @@ describe("ConfigService", () => {
           `Pinned remote config could not be resolved: expected GitHub commit ${malformedPinnedCommit}, observed HTTP 400 Bad Request`,
         );
         expect(error.path).toBe(
-          `https://raw.githubusercontent.com/guilhermecastro/system-setup/${malformedPinnedCommit}/system-config.json`,
+          `https://raw.githubusercontent.com/guilhermecastro/rig/${malformedPinnedCommit}/system-config.json`,
         );
       },
     );
@@ -348,7 +348,7 @@ describe("ConfigService", () => {
     await expectConfigError(
       loadConfig({
         _tag: "https",
-        url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         pin: {
           provider: "github",
           ref: pinnedCommit,
@@ -359,7 +359,7 @@ describe("ConfigService", () => {
           `Pinned remote config could not be resolved: expected GitHub commit ${pinnedCommit}, observed HTTP 503 Service Unavailable`,
         );
         expect(error.path).toBe(
-          `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/system-config.json`,
+          `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
         );
       },
     );

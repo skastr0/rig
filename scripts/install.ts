@@ -6,7 +6,7 @@ import { homedir, platform, arch } from "os";
 import { compile, type Target } from "./compile";
 
 const INSTALL_DIR = process.env.INSTALL_DIR || join(homedir(), ".local", "bin");
-const BINARY_NAME = "system-setup";
+const BINARY_NAME = "rig";
 
 function detectTarget(): Target {
   const os = platform();
@@ -44,7 +44,7 @@ function detectTarget(): Target {
 const target = detectTarget();
 const destPath = join(INSTALL_DIR, BINARY_NAME);
 
-console.log(`Building system-setup for ${target.platform}-${target.arch}...`);
+console.log(`Building rig for ${target.platform}-${target.arch}...`);
 mkdirSync(INSTALL_DIR, { recursive: true });
 await compile(target, destPath);
 

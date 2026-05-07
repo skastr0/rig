@@ -49,31 +49,31 @@ describe("resolveConfigSource", () => {
   });
 
   it("resolves bare GitHub shorthand to the repository root system config", async () => {
-    await expect(
-      Effect.runPromise(resolveConfigSource("gh:guilhermecastro/system-setup")),
-    ).resolves.toEqual({
-      _tag: "https",
-      url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/HEAD/${defaultGitHubConfigPath}`,
-    });
+    await expect(Effect.runPromise(resolveConfigSource("gh:guilhermecastro/rig"))).resolves.toEqual(
+      {
+        _tag: "https",
+        url: `https://raw.githubusercontent.com/guilhermecastro/rig/HEAD/${defaultGitHubConfigPath}`,
+      },
+    );
   });
 
   it("resolves GitHub shorthand with an explicit config path", async () => {
     await expect(
-      Effect.runPromise(resolveConfigSource("gh:guilhermecastro/system-setup/configs/work.json")),
+      Effect.runPromise(resolveConfigSource("gh:guilhermecastro/rig/configs/work.json")),
     ).resolves.toEqual({
       _tag: "https",
-      url: "https://raw.githubusercontent.com/guilhermecastro/system-setup/HEAD/configs/work.json",
+      url: "https://raw.githubusercontent.com/guilhermecastro/rig/HEAD/configs/work.json",
     });
   });
 
   it("resolves pinned GitHub shorthand to the exact commit URL", async () => {
     await expect(
       Effect.runPromise(
-        resolveConfigSource(`gh:guilhermecastro/system-setup@${pinnedCommit}/configs/work.json`),
+        resolveConfigSource(`gh:guilhermecastro/rig@${pinnedCommit}/configs/work.json`),
       ),
     ).resolves.toEqual({
       _tag: "https",
-      url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/configs/work.json`,
+      url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/configs/work.json`,
       pin: {
         provider: "github",
         ref: pinnedCommit,
@@ -99,13 +99,11 @@ describe("resolveConfigSource", () => {
   it("supports GitHub shorthand with both a commit pin and integrity metadata", async () => {
     await expect(
       Effect.runPromise(
-        resolveConfigSource(
-          `gh:guilhermecastro/system-setup@${pinnedCommit}#sha256=${integrityDigest}`,
-        ),
+        resolveConfigSource(`gh:guilhermecastro/rig@${pinnedCommit}#sha256=${integrityDigest}`),
       ),
     ).resolves.toEqual({
       _tag: "https",
-      url: `https://raw.githubusercontent.com/guilhermecastro/system-setup/${pinnedCommit}/${defaultGitHubConfigPath}`,
+      url: `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/${defaultGitHubConfigPath}`,
       pin: {
         provider: "github",
         ref: pinnedCommit,
@@ -127,21 +125,21 @@ describe("resolveConfigSource", () => {
   });
 
   it("rejects GitHub shorthand paths with trailing slashes", async () => {
-    const error = await expectConfigError("gh:guilhermecastro/system-setup/");
+    const error = await expectConfigError("gh:guilhermecastro/rig/");
 
     expect(error.message).toBe(
       `Invalid GitHub config source: file paths cannot contain empty segments or trailing slashes. ${githubShorthandExpectation}`,
     );
-    expect(error.path).toBe("gh:guilhermecastro/system-setup/");
+    expect(error.path).toBe("gh:guilhermecastro/rig/");
   });
 
   it("rejects mutable GitHub ref pins with actionable guidance", async () => {
-    const error = await expectConfigError("gh:guilhermecastro/system-setup@main");
+    const error = await expectConfigError("gh:guilhermecastro/rig@main");
 
     expect(error.message).toBe(
       `Invalid GitHub config source: immutable GitHub pins must be full 40-character commit SHAs. Expected a Git commit SHA, observed "main". ${githubShorthandExpectation}`,
     );
-    expect(error.path).toBe("gh:guilhermecastro/system-setup@main");
+    expect(error.path).toBe("gh:guilhermecastro/rig@main");
   });
 
   it("rejects invalid remote integrity fragments with expected-versus-observed guidance", async () => {

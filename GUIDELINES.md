@@ -1,4 +1,4 @@
-# System Setup - Effect Development Guidelines
+# Rig - Effect Development Guidelines
 
 Guidelines for writing Effect-based TypeScript in this codebase.
 
