@@ -371,7 +371,7 @@ const pathExists = (
 ): Effect.Effect<boolean, FileSystemInstallError> =>
   fs.exists(path).pipe(Effect.mapError(mapFileSystemError(path, context)));
 
-const ensureSymlinkTargetExists = (
+const rejectMissingSymlinkTarget = (
   fs: FileSystem.FileSystem,
   inspection: SymlinkInspection,
 ): Effect.Effect<void, FileSystemInstallError> =>
@@ -392,7 +392,7 @@ const ensureSymlinkTargetExists = (
     }
   });
 
-const ensureSymlinkParentExists = (
+const rejectMissingSymlinkParent = (
   fs: FileSystem.FileSystem,
   inspection: SymlinkInspection,
 ): Effect.Effect<void, FileSystemInstallError> =>
@@ -476,8 +476,8 @@ const checkSymlinkInstall = (
     const fs = yield* FileSystem.FileSystem;
     const inspection = getSymlinkInspection(install);
 
-    yield* ensureSymlinkTargetExists(fs, inspection);
-    yield* ensureSymlinkParentExists(fs, inspection);
+    yield* rejectMissingSymlinkTarget(fs, inspection);
+    yield* rejectMissingSymlinkParent(fs, inspection);
 
     const linkExists = yield* pathExists(
       fs,

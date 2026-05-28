@@ -29,7 +29,7 @@ const normalizePath = (path: string): string => {
   return Path.normalize(resolved);
 };
 
-const validatePath = (path: string): Effect.Effect<string, BackupError> => {
+const normalizeBackupPath = (path: string): Effect.Effect<string, BackupError> => {
   const normalized = normalizePath(path);
 
   // Must be absolute after normalization
@@ -62,8 +62,7 @@ export const BackupServiceLive = Layer.succeed(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
 
-        // Validate and normalize the source path
-        const normalizedPath = yield* validatePath(sourcePath);
+        const normalizedPath = yield* normalizeBackupPath(sourcePath);
 
         const exists = yield* fs
           .exists(normalizedPath)

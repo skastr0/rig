@@ -7,7 +7,7 @@ export interface PlanResult {
   readonly levels: readonly (readonly SystemItem[])[];
 }
 
-const validateDependencies = (
+const rejectUnknownDependencies = (
   items: readonly SystemItem[],
 ): Effect.Effect<void, ValidationError> => {
   const names = new Set(items.map((item) => item.name));
@@ -121,7 +121,7 @@ export const topologicalSort = (
   items: readonly SystemItem[],
 ): Effect.Effect<PlanResult, CycleError | ValidationError> =>
   Effect.gen(function* () {
-    yield* validateDependencies(items);
+    yield* rejectUnknownDependencies(items);
     yield* detectCycle(items);
 
     const { sorted, levels } = kahnSort(items);

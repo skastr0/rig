@@ -67,7 +67,7 @@ const loadLocalConfigContent = (configPath: string) =>
       );
   });
 
-const ensureLocalConfigTargetDoesNotExist = (configPath: string) =>
+const rejectExistingLocalConfigTarget = (configPath: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
@@ -352,7 +352,7 @@ export const ConfigServiceLive = Layer.succeed(
         const content = yield* renderStarterConfig();
 
         yield* decodeConfig(content, { _tag: "local", path: configPath });
-        yield* ensureLocalConfigTargetDoesNotExist(configPath);
+        yield* rejectExistingLocalConfigTarget(configPath);
         yield* writeStarterConfigContent(configPath, content);
 
         return {
