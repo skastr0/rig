@@ -1,13 +1,9 @@
 import { Context, Effect, Layer, Ref, Deferred } from "effect";
 import { FileSystem } from "@effect/platform";
-import * as Path from "node:path";
 import type {
   SystemItem,
-  GitInstall,
-  BrewInstall,
   DirInstall,
   SymlinkInstall,
-  SkillsInstall,
   TimeoutInput as ItemTimeoutInput,
 } from "../schema/config.js";
 import type { PlanResult } from "./Planner.js";
@@ -17,6 +13,7 @@ import { GitService } from "../services/GitService.js";
 import { BrewService } from "../services/BrewService.js";
 import { ShellError, GitError, BrewError, BackupError, FileSystemInstallError } from "../errors.js";
 import { expandPath } from "../utils.js";
+import { installInspection } from "./InstallInspection.js";
 import {
   executeCheckedItem,
   type ExecuteItemError,
@@ -92,290 +89,35 @@ export interface Executor {
 
 export const Executor = Context.GenericTag<Executor>("Executor");
 
-const isGitInstall = (install: SystemItem["install"]): install is GitInstall =>
-  typeof install === "object" && install.source === "git";
-
-const isBrewInstall = (install: SystemItem["install"]): install is BrewInstall =>
-  typeof install === "object" && install.source === "brew";
-
-const isDirInstall = (install: SystemItem["install"]): install is DirInstall =>
-  typeof install === "object" && install.source === "dir";
-
-const isSymlinkInstall = (install: SystemItem["install"]): install is SymlinkInstall =>
-  typeof install === "object" && install.source === "symlink";
-
-const isSkillsInstall = (install: SystemItem["install"]): install is SkillsInstall =>
-  typeof install === "object" && install.source === "skills";
-
-const formatCommand = (command: string, args: readonly string[] = []): string =>
-  args.length > 0 ? `${command} ${args.join(" ")}` : command;
-
-const normalizeManagedPath = (path: string): string =>
-  Path.normalize(Path.resolve(expandPath(path)));
-
-const normalizeSymlinkTargetForComparison = (linkPath: string, target: string): string =>
-  Path.normalize(
-    Path.resolve(
-      Path.dirname(linkPath),
-      Path.isAbsolute(expandPath(target)) ? expandPath(target) : target,
-    ),
-  );
-
-const getSymlinkLinkPath = (install: SymlinkInstall): string => normalizeManagedPath(install.path);
-
-const getSymlinkDisplayTarget = (install: SymlinkInstall): string =>
-  normalizeSymlinkTargetForComparison(getSymlinkLinkPath(install), install.target);
-
-const getSymlinkTargetForCreate = (target: string): string => {
-  const expandedTarget = expandPath(target);
-  return Path.isAbsolute(expandedTarget)
-    ? Path.normalize(Path.resolve(expandedTarget))
-    : Path.normalize(target);
-};
-
-const GLOBAL_SKILLS_PATH_BY_AGENT = new Map<string, string>([
-  ["adal", "~/.adal/skills"],
-  ["amp", "~/.config/agents/skills"],
-  ["antigravity", "~/.gemini/antigravity/skills"],
-  ["augment", "~/.augment/skills"],
-  ["bob", "~/.bob/skills"],
-  ["claude-code", "~/.claude/skills"],
-  ["cline", "~/.agents/skills"],
-  ["codebuddy", "~/.codebuddy/skills"],
-  ["codex", "~/.codex/skills"],
-  ["command-code", "~/.commandcode/skills"],
-  ["continue", "~/.continue/skills"],
-  ["cortex", "~/.snowflake/cortex/skills"],
-  ["crush", "~/.config/crush/skills"],
-  ["cursor", "~/.cursor/skills"],
-  ["deepagents", "~/.deepagents/agent/skills"],
-  ["droid", "~/.factory/skills"],
-  ["firebender", "~/.firebender/skills"],
-  ["gemini-cli", "~/.gemini/skills"],
-  ["github-copilot", "~/.copilot/skills"],
-  ["goose", "~/.config/goose/skills"],
-  ["iflow-cli", "~/.iflow/skills"],
-  ["junie", "~/.junie/skills"],
-  ["kilo", "~/.kilocode/skills"],
-  ["kimi-cli", "~/.config/agents/skills"],
-  ["kiro-cli", "~/.kiro/skills"],
-  ["kode", "~/.kode/skills"],
-  ["mcpjam", "~/.mcpjam/skills"],
-  ["mistral-vibe", "~/.vibe/skills"],
-  ["mux", "~/.mux/skills"],
-  ["neovate", "~/.neovate/skills"],
-  ["openclaw", "~/.openclaw/skills"],
-  ["opencode", "~/.config/opencode/skills"],
-  ["openhands", "~/.openhands/skills"],
-  ["pi", "~/.pi/agent/skills"],
-  ["pochi", "~/.pochi/skills"],
-  ["qoder", "~/.qoder/skills"],
-  ["qwen-code", "~/.qwen/skills"],
-  ["replit", "~/.config/agents/skills"],
-  ["roo", "~/.roo/skills"],
-  ["trae", "~/.trae/skills"],
-  ["trae-cn", "~/.trae-cn/skills"],
-  ["universal", "~/.config/agents/skills"],
-  ["warp", "~/.agents/skills"],
-  ["windsurf", "~/.codeium/windsurf/skills"],
-  ["zencoder", "~/.zencoder/skills"],
-]);
-
-const getGlobalSkillsRoot = (agent: string): string | undefined =>
-  GLOBAL_SKILLS_PATH_BY_AGENT.get(agent);
-
-const getSkillPath = (agent: string, skill: string): string | undefined => {
-  const root = getGlobalSkillsRoot(agent);
-  return root === undefined ? undefined : normalizeManagedPath(Path.join(root, skill, "SKILL.md"));
-};
-
-const getSkillsSourceRef = (install: SkillsInstall): string => {
-  // npx skills add accepts org/repo or https://github.com/org/repo
-  // It does NOT accept /tree/<sha> for commit pinning — that format
-  // makes git try --branch <sha> which fails for commit hashes.
-  // Just pass the repo directly; the skills CLI resolves it correctly.
-  return install.repo;
-};
-
-const getSkillsAddArgs = (install: SkillsInstall): readonly string[] => [
-  "DISABLE_TELEMETRY=1",
-  "npx",
-  "--yes",
-  install.package,
-  "add",
-  getSkillsSourceRef(install),
-  ...install.skills.flatMap((skill) => ["--skill", skill]),
-  ...install.agents.flatMap((agent) => ["--agent", agent]),
-  "--global",
-  ...(install.mode === "symlink" ? [] : ["--copy"]),
-  "--yes",
-];
-
-const getSkillsAddCommand = (install: SkillsInstall): string =>
-  formatCommand("env", getSkillsAddArgs(install));
-
-const describePathType = (type: string): string => {
-  switch (type) {
-    case "Directory":
-      return "directory";
-    case "File":
-      return "file";
-    case "SymbolicLink":
-      return "symlink";
-    default:
-      return type.toLowerCase();
-  }
-};
-
-const formatUnknownError = (error: unknown): string => {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = error.message;
-    if (typeof message === "string" && message.trim().length > 0) {
-      return message;
-    }
-  }
-
-  return String(error);
-};
-
-const toFileSystemInstallError = (path: string, reason: string): FileSystemInstallError =>
-  new FileSystemInstallError({ path, reason });
-
-const mapFileSystemError =
-  (path: string, context: string) =>
-  (error: unknown): FileSystemInstallError =>
-    toFileSystemInstallError(path, `${context}: ${formatUnknownError(error)}`);
-
-const getCheckDescription = (item: SystemItem): string => {
-  if (isDirInstall(item.install)) {
-    return normalizeManagedPath(item.install.path);
-  }
-
-  if (isSymlinkInstall(item.install)) {
-    return `${getSymlinkLinkPath(item.install)} -> ${getSymlinkDisplayTarget(item.install)}`;
-  }
-
-  if (isSkillsInstall(item.install)) {
-    const install = item.install;
-    return install.agents
-      .flatMap((agent) =>
-        install.skills.map((skill) => getSkillPath(agent, skill) ?? `${agent}:${skill}`),
-      )
-      .join(", ");
-  }
-
-  return item.check ?? "";
-};
+const {
+  checkDirInstall,
+  checkSkillsInstall,
+  checkSymlinkInstall,
+  getCheckDescription,
+  getExecutionDetail,
+  getInstallPreview,
+  getManagedUpdateDetail,
+  getManagedUpdatePreview,
+  getManagedUpdatePreviewSteps,
+  getShellUpdatePreview,
+  getSkillsAddArgs,
+  getSymlinkDisplayTarget,
+  getSymlinkLinkPath,
+  getSymlinkTargetForCreate,
+  isBrewInstall,
+  isDirInstall,
+  isGitInstall,
+  isSkillsInstall,
+  isSymlinkInstall,
+  mapFileSystemError,
+  normalizeManagedPath,
+  toFileSystemInstallError,
+} = installInspection;
 
 export type ItemCheckResult =
   | { type: "installed" }
   | { type: "missing" }
   | { type: "needs_update"; reason: string };
-
-const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string[] => {
-  if (typeof install === "string") {
-    return [install];
-  }
-
-  if (isDirInstall(install)) {
-    return [`create directory ${normalizeManagedPath(install.path)}`];
-  }
-
-  if (isSymlinkInstall(install)) {
-    const linkPath = getSymlinkLinkPath(install);
-    const targetPath = getSymlinkDisplayTarget(install);
-    return [`create symlink ${linkPath} -> ${targetPath}`];
-  }
-
-  if (isBrewInstall(install)) {
-    const commands: string[] = [];
-    if (install.tap) {
-      commands.push(formatCommand("brew", ["tap", install.tap]));
-    }
-
-    if (install.formula) {
-      commands.push(formatCommand("brew", ["install", install.formula, ...(install.args ?? [])]));
-      return commands;
-    }
-
-    if (install.cask) {
-      commands.push(
-        formatCommand("brew", ["install", "--cask", install.cask, ...(install.args ?? [])]),
-      );
-      return commands;
-    }
-
-    return commands;
-  }
-
-  if (isGitInstall(install)) {
-    const targetPath = expandPath(install.path);
-
-    if (install.sparse && install.sparse.length > 0) {
-      const cloneArgs = ["clone", "--filter=blob:none", "--no-checkout"];
-      if (install.branch) {
-        cloneArgs.push("-b", install.branch);
-      }
-      cloneArgs.push(install.repo, targetPath);
-
-      return [
-        formatCommand("git", cloneArgs),
-        formatCommand("git", ["-C", targetPath, "sparse-checkout", "init", "--cone"]),
-        formatCommand("git", ["-C", targetPath, "sparse-checkout", "set", ...install.sparse]),
-        formatCommand("git", ["-C", targetPath, "checkout"]),
-      ];
-    }
-
-    const cloneArgs = ["clone"];
-    if (install.branch) {
-      cloneArgs.push("-b", install.branch);
-    }
-    cloneArgs.push(install.repo, targetPath);
-
-    return [formatCommand("git", cloneArgs)];
-  }
-
-  if (isSkillsInstall(install)) {
-    return [getSkillsAddCommand(install)];
-  }
-
-  return [];
-};
-
-const getInstallPreview = (install: SystemItem["install"]): ExecutionPreview => ({
-  label:
-    typeof install === "string"
-      ? "shell install command"
-      : `structured install (${install.source})`,
-  steps: getInstallPreviewSteps(install),
-});
-
-const getManagedUpdatePreviewSteps = (install: SymlinkInstall): readonly string[] => {
-  const linkPath = getSymlinkLinkPath(install);
-  const targetPath = getSymlinkDisplayTarget(install);
-  return [`update symlink ${linkPath} -> ${targetPath}`];
-};
-
-const getManagedUpdatePreview = (install: SymlinkInstall): ExecutionPreview => ({
-  label: "structured update (symlink)",
-  steps: getManagedUpdatePreviewSteps(install),
-});
-
-const getExecutionDetail = (install: SystemItem["install"]): string | undefined => {
-  if (isDirInstall(install) || isSymlinkInstall(install) || isSkillsInstall(install)) {
-    return getInstallPreviewSteps(install)[0];
-  }
-
-  return undefined;
-};
-
-const getManagedUpdateDetail = (install: SymlinkInstall): string =>
-  getManagedUpdatePreviewSteps(install)[0]!;
-
-const getShellUpdatePreview = (command: string): ExecutionPreview => ({
-  label: "shell update command",
-  steps: [command],
-});
 
 const emitVerbose = (options: ExecutorOptions | undefined, message: string): void => {
   if (options?.verbose) {
@@ -443,167 +185,6 @@ const checkGenericItem = (
     Effect.catchAll((error) => (error.timedOut ? Effect.fail(error) : Effect.succeed(false))),
   );
 };
-
-const checkSkillsInstall = (
-  install: SkillsInstall,
-): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-
-    for (const agent of install.agents) {
-      if (getGlobalSkillsRoot(agent) === undefined) {
-        return yield* Effect.fail(
-          toFileSystemInstallError(
-            agent,
-            `Unsupported skills agent "${agent}". Add its global skills path before using it in a skills install source.`,
-          ),
-        );
-      }
-
-      for (const skill of install.skills) {
-        const skillPath = getSkillPath(agent, skill)!;
-        const exists = yield* fs
-          .exists(skillPath)
-          .pipe(
-            Effect.mapError(
-              mapFileSystemError(skillPath, `Failed to inspect installed skill "${skill}"`),
-            ),
-          );
-
-        if (!exists) {
-          return { type: "missing" };
-        }
-      }
-    }
-
-    return { type: "installed" };
-  });
-
-const checkDirInstall = (
-  install: DirInstall,
-): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = normalizeManagedPath(install.path);
-    const exists = yield* fs
-      .exists(path)
-      .pipe(
-        Effect.mapError(mapFileSystemError(path, `Failed to inspect directory path "${path}"`)),
-      );
-
-    if (!exists) {
-      return { type: "missing" };
-    }
-
-    const stat = yield* fs
-      .stat(path)
-      .pipe(
-        Effect.mapError(mapFileSystemError(path, `Failed to inspect directory path "${path}"`)),
-      );
-
-    if (stat.type === "Directory") {
-      return { type: "installed" };
-    }
-
-    return yield* Effect.fail(
-      toFileSystemInstallError(
-        path,
-        `Expected directory at "${path}", but found ${describePathType(stat.type)}. Remove or rename the existing path, or choose a different dir path.`,
-      ),
-    );
-  });
-
-const checkSymlinkInstall = (
-  install: SymlinkInstall,
-): Effect.Effect<ItemCheckResult, FileSystemInstallError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const linkPath = getSymlinkLinkPath(install);
-    const targetPath = getSymlinkDisplayTarget(install);
-    const parentPath = Path.dirname(linkPath);
-
-    const targetExists = yield* fs
-      .exists(targetPath)
-      .pipe(
-        Effect.mapError(
-          mapFileSystemError(targetPath, `Failed to inspect symlink target for "${linkPath}"`),
-        ),
-      );
-
-    if (!targetExists) {
-      return yield* Effect.fail(
-        toFileSystemInstallError(
-          linkPath,
-          `Symlink target "${targetPath}" does not exist. Create the target first or update install.target.`,
-        ),
-      );
-    }
-
-    const parentExists = yield* fs
-      .exists(parentPath)
-      .pipe(
-        Effect.mapError(
-          mapFileSystemError(parentPath, `Failed to inspect parent directory for "${linkPath}"`),
-        ),
-      );
-
-    if (!parentExists) {
-      return yield* Effect.fail(
-        toFileSystemInstallError(
-          linkPath,
-          `Parent directory "${parentPath}" is missing for symlink "${linkPath}". Add a dir item or dependency before this symlink.`,
-        ),
-      );
-    }
-
-    const linkExists = yield* fs
-      .exists(linkPath)
-      .pipe(
-        Effect.mapError(
-          mapFileSystemError(linkPath, `Failed to inspect symlink path "${linkPath}"`),
-        ),
-      );
-
-    if (!linkExists) {
-      return { type: "missing" };
-    }
-
-    const stat = yield* fs
-      .stat(linkPath)
-      .pipe(
-        Effect.mapError(
-          mapFileSystemError(linkPath, `Failed to inspect symlink path "${linkPath}"`),
-        ),
-      );
-
-    if (stat.type === "SymbolicLink") {
-      const currentTarget = yield* fs
-        .readLink(linkPath)
-        .pipe(
-          Effect.mapError(
-            mapFileSystemError(
-              linkPath,
-              `Failed to read existing symlink target for "${linkPath}"`,
-            ),
-          ),
-        );
-      const normalizedCurrentTarget = normalizeSymlinkTargetForComparison(linkPath, currentTarget);
-
-      if (normalizedCurrentTarget === targetPath) {
-        return { type: "installed" };
-      }
-
-      return {
-        type: "needs_update",
-        reason: `Symlink "${linkPath}" points to "${normalizedCurrentTarget}" instead of "${targetPath}". Re-run with --update to replace it, or fix the existing link manually.`,
-      };
-    }
-
-    return {
-      type: "needs_update",
-      reason: `Path "${linkPath}" exists as a ${describePathType(stat.type)}, not the desired symlink to "${targetPath}". Re-run with --update to replace it, or move/remove the existing path manually.`,
-    };
-  });
 
 const checkItem = (
   item: SystemItem,
