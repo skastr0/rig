@@ -17,6 +17,12 @@ import { GitService } from "../services/GitService.js";
 import { BrewService } from "../services/BrewService.js";
 import { ShellError, GitError, BrewError, BackupError, FileSystemInstallError } from "../errors.js";
 import { expandPath } from "../utils.js";
+import {
+  executeCheckedItem,
+  type ExecuteItemError,
+  type ItemExecutionOperations,
+  type ItemExecutionServices,
+} from "./ExecutionBranches.js";
 
 export type ItemStatus = "installed" | "missing" | "error" | "blocked";
 export type ItemAction =
@@ -261,7 +267,7 @@ const getCheckDescription = (item: SystemItem): string => {
   return item.check ?? "";
 };
 
-type ItemCheckResult =
+export type ItemCheckResult =
   | { type: "installed" }
   | { type: "missing" }
   | { type: "needs_update"; reason: string };
@@ -721,6 +727,22 @@ const updateItem = (
   return runShellCommand(item.name, item.update, shell, item.timeout, options).pipe(Effect.asVoid);
 };
 
+const itemExecutionOperations: ItemExecutionOperations = {
+  emitVerbose,
+  isSymlinkInstall,
+  toFileSystemInstallError,
+  getSymlinkLinkPath,
+  getShellUpdatePreview,
+  getManagedUpdatePreview,
+  getManagedUpdateDetail,
+  getManagedUpdatePreviewSteps,
+  getInstallPreview,
+  getExecutionDetail,
+  updateItem,
+  updateSymlinkItem,
+  installItem,
+};
+
 type LockResult =
   | { type: "wait"; lock: Deferred.Deferred<void> }
   | { type: "acquired"; lock: Deferred.Deferred<void> };
@@ -789,11 +811,13 @@ const executeItem = (
   ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
-    const shell = yield* ShellService;
-    const backup = yield* BackupService;
-    const git = yield* GitService;
-    const brew = yield* BrewService;
-    const fs = yield* FileSystem.FileSystem;
+    const services: ItemExecutionServices = {
+      shell: yield* ShellService,
+      backup: yield* BackupService,
+      git: yield* GitService,
+      brew: yield* BrewService,
+      fs: yield* FileSystem.FileSystem,
+    };
 
     const effectiveGroup = isBrewInstall(item.install)
       ? (item.group ?? "brew")
@@ -806,199 +830,8 @@ const executeItem = (
 
     const executeWithLock = Effect.gen(function* () {
       emitVerbose(options, `[${item.name}] check: ${getCheckDescription(item)}`);
-      const itemState = yield* checkItem(item, shell);
-
-      // Case 1: Item is installed
-      if (itemState.type === "installed") {
-        // Check if we should run update
-        if (options?.update && item.update) {
-          // Case 1a: Dry run - show what would be updated
-          if (options?.dryRun) {
-            const preview = getShellUpdatePreview(item.update);
-
-            for (const step of preview.steps) {
-              emitVerbose(options, `[${item.name}] would update: ${step}`);
-            }
-
-            const result: ExecutionResult = {
-              name: item.name,
-              status: "installed",
-              action: "would_update",
-              preview,
-            };
-            options?.onProgress?.(result);
-            return result;
-          }
-
-          // Case 1b: Real run - execute update command
-          let backedUp: string | undefined;
-
-          if (item.backup) {
-            emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
-            const backupResult = yield* backup.backup(item.backup);
-            if (!backupResult.skipped) {
-              backedUp = backupResult.destination;
-            }
-          }
-
-          emitVerbose(options, `[${item.name}] update: ${item.update}`);
-          yield* updateItem(item, shell, options);
-
-          const result: ExecutionResult = backedUp
-            ? {
-                name: item.name,
-                status: "installed",
-                action: "updated",
-                backed_up: backedUp,
-              }
-            : {
-                name: item.name,
-                status: "installed",
-                action: "updated",
-              };
-
-          options?.onProgress?.(result);
-          return result;
-        }
-
-        // Case 1c: No update needed - skip
-        const result: ExecutionResult = {
-          name: item.name,
-          status: "installed",
-          action: "skipped",
-        };
-        options?.onProgress?.(result);
-        return result;
-      }
-
-      if (itemState.type === "needs_update") {
-        if (!isSymlinkInstall(item.install)) {
-          return yield* Effect.fail(
-            toFileSystemInstallError(
-              item.name,
-              `Unexpected managed update state for item "${item.name}".`,
-            ),
-          );
-        }
-
-        if (!options?.update) {
-          return yield* Effect.fail(
-            toFileSystemInstallError(getSymlinkLinkPath(item.install), itemState.reason),
-          );
-        }
-
-        if (options?.dryRun) {
-          const preview = getManagedUpdatePreview(item.install);
-
-          for (const step of preview.steps) {
-            emitVerbose(options, `[${item.name}] would update: ${step}`);
-          }
-
-          const result: ExecutionResult = {
-            name: item.name,
-            status: "installed",
-            action: "would_update",
-            detail: getManagedUpdateDetail(item.install),
-            preview,
-          };
-          options?.onProgress?.(result);
-          return result;
-        }
-
-        let backedUp: string | undefined;
-
-        if (item.backup) {
-          emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
-          const backupResult = yield* backup.backup(item.backup);
-          if (!backupResult.skipped) {
-            backedUp = backupResult.destination;
-          }
-        }
-
-        for (const step of getManagedUpdatePreviewSteps(item.install)) {
-          emitVerbose(options, `[${item.name}] update: ${step}`);
-        }
-
-        yield* updateSymlinkItem(item.install, fs);
-
-        const result: ExecutionResult = backedUp
-          ? {
-              name: item.name,
-              status: "installed",
-              action: "updated",
-              backed_up: backedUp,
-            }
-          : {
-              name: item.name,
-              status: "installed",
-              action: "updated",
-            };
-
-        options?.onProgress?.(result);
-        return result;
-      }
-
-      // Case 2: Item is missing
-      if (options?.dryRun) {
-        const preview = getInstallPreview(item.install);
-        const detail = getExecutionDetail(item.install);
-
-        for (const command of preview.steps) {
-          emitVerbose(options, `[${item.name}] would install: ${command}`);
-        }
-
-        const result: ExecutionResult = detail
-          ? {
-              name: item.name,
-              status: "missing",
-              action: "skipped",
-              detail,
-              preview,
-            }
-          : {
-              name: item.name,
-              status: "missing",
-              action: "skipped",
-              preview,
-            };
-        options?.onProgress?.(result);
-        return result;
-      }
-
-      // Install missing item
-      let backedUp: string | undefined;
-
-      if (item.backup) {
-        emitVerbose(options, `[${item.name}] backup: ${item.backup}`);
-        const backupResult = yield* backup.backup(item.backup);
-        if (!backupResult.skipped) {
-          backedUp = backupResult.destination;
-        }
-      }
-
-      const installPreview = getInstallPreview(item.install);
-
-      for (const command of installPreview.steps) {
-        emitVerbose(options, `[${item.name}] install: ${command}`);
-      }
-
-      yield* installItem(item, shell, git, brew, fs, options);
-
-      const result: ExecutionResult = backedUp
-        ? {
-            name: item.name,
-            status: "installed",
-            action: "installed",
-            backed_up: backedUp,
-          }
-        : {
-            name: item.name,
-            status: "installed",
-            action: "installed",
-          };
-
-      options?.onProgress?.(result);
-      return result;
+      const itemState = yield* checkItem(item, services.shell);
+      return yield* executeCheckedItem(item, itemState, services, itemExecutionOperations, options);
     });
 
     // Use ensuring to always release the lock, even on failure/interruption
@@ -1012,7 +845,7 @@ const formatReason = (reason: string, fallback: string): string => {
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
-type ExecutionError = ShellError | GitError | BrewError | BackupError | FileSystemInstallError;
+type ExecutionError = ExecuteItemError;
 
 const formatStructuredCommandDetail = (
   error: Pick<GitError | BrewError, "command" | "exitCode" | "stderr">,
