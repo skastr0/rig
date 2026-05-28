@@ -8,10 +8,11 @@
         "@effect/cli": "^0.72.1",
         "@effect/platform": "^0.93.6",
         "@effect/platform-bun": "^0.86.0",
-        "effect": "^3.19.9",
+        "effect": "3.21.0",
       },
       "devDependencies": {
         "@effect/vitest": "^0.16.3",
+        "@skastr0/pulsar-project-module-effect": "0.1.1",
         "bun-types": "^1.3.4",
         "oxfmt": "latest",
         "oxlint": "^1.28.0",
@@ -19,6 +20,9 @@
         "vitest": "^2.1.9",
       },
     },
+  },
+  "overrides": {
+    "effect": "3.21.0",
   },
   "packages": {
     "@effect/cli": ["@effect/cli@0.72.1", "", { "dependencies": { "ini": "^4.1.3", "toml": "^3.0.0", "yaml": "^2.5.0" }, "peerDependencies": { "@effect/platform": "^0.93.0", "@effect/printer": "^0.47.0", "@effect/printer-ansi": "^0.47.0", "effect": "^3.19.3" } }, "sha512-HGDMGD23TxFW9tCSX6g+M2u0robikMA0mP0SqeJMj7FWXTdcQ+cQsJE99bxi9iu+5YID7MIrVJMs8TUwXUV2sg=="],
@@ -211,6 +215,12 @@
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.53.3", "", { "os": "win32", "cpu": "x64" }, "sha512-UhTd8u31dXadv0MopwGgNOBpUVROFKWVQgAg5N1ESyCz8AuBcMqm4AuTjrwgQKGDfoFuz02EuMRHQIw/frmYKQ=="],
 
+    "@skastr0/pulsar-core": ["@skastr0/pulsar-core@0.1.1", "", { "dependencies": { "effect": "^3.0.0" } }, "sha512-x/ZjfOdOis6avK38W9PZdDYX4BCyDzpd8jHE52gdnVCRRBgI6ETa4lFEAjog06WEEwrSJhvo0nLol1PIlkAIcA=="],
+
+    "@skastr0/pulsar-project-module-effect": ["@skastr0/pulsar-project-module-effect@0.1.1", "", { "dependencies": { "@skastr0/pulsar-project-module-sdk": "0.1.1", "effect": "^3.0.0" } }, "sha512-Zzf5SxtMa6hxHnRxOw2kxliNtAbazNUjDzTAW67Vs6lnc7E+H/V+SrAwFJ7ucmjObzZ6GS0/yKNQ6EmtD3T4Kg=="],
+
+    "@skastr0/pulsar-project-module-sdk": ["@skastr0/pulsar-project-module-sdk@0.1.1", "", { "dependencies": { "@skastr0/pulsar-core": "0.1.1", "effect": "^3.0.0", "typescript": "^5.8.0" } }, "sha512-eMFDnlbag8EnE3T/OJVH3exyHk9sjdY2hMO+MTph7Z0qT4XD04+NRjyTClf4Hj6jXH6roLnaskoHG56GWJBLxA=="],
+
     "@standard-schema/spec": ["@standard-schema/spec@1.0.0", "", {}, "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="],
 
     "@types/estree": ["@types/estree@1.0.8", "", {}, "sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w=="],
@@ -249,7 +259,7 @@
 
     "detect-libc": ["detect-libc@1.0.3", "", { "bin": { "detect-libc": "./bin/detect-libc.js" } }, "sha512-pGjwhsmsp4kL2RTz08wcOlGN83otlqHeD/Z5T8GXZB+/YcpQ/dgo+lbU8ZsGxV0HIvqqxo9l7mqYwyYMD9bKDg=="],
 
-    "effect": ["effect@3.19.9", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-taMXnfG/p+j7AmMOHHQaCHvjqwu9QBO3cxuZqL2dMG/yWcEMw0ZHruHe9B49OxtfKH/vKKDDKRhZ+1GJ2p5R5w=="],
+    "effect": ["effect@3.21.0", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-PPN80qRokCd1f015IANNhrwOnLO7GrrMQfk4/lnZRE/8j7UPWrNNjPV0uBrZutI/nHzernbW+J0hdqQysHiSnQ=="],
 
     "es-module-lexer": ["es-module-lexer@1.7.0", "", {}, "sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA=="],
 

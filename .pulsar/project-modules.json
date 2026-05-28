@@ -1,0 +1,10 @@
+{
+  "schema": "pulsar/project-modules/v1",
+  "modules": [
+    {
+      "id": "@skastr0/pulsar-project-module-effect",
+      "kind": "repo-local",
+      "path": ".pulsar/effect-project-module.mjs"
+    }
+  ]
+}
