@@ -34,6 +34,11 @@ export interface SelectionAnalysis {
   readonly selectedNames: ReadonlySet<string>;
 }
 
+interface PendingSelection {
+  readonly item: SystemItem;
+  readonly path: readonly string[];
+}
+
 const getDirectSelectionReason = (
   item: SystemItem,
   options: SelectionOptions,
@@ -61,14 +66,17 @@ const getDirectSelectionReason = (
   };
 };
 
-export const analyzeSelection = (
+const collectDirectSelections = (
   items: readonly SystemItem[],
   options: SelectionOptions,
-): SelectionAnalysis => {
-  const itemMap = new Map(items.map((item) => [item.name, item]));
+): {
+  readonly matchedNames: Set<string>;
+  readonly pending: PendingSelection[];
+  readonly reasons: Map<string, SelectionReason>;
+} => {
   const matchedNames = new Set<string>();
   const reasons = new Map<string, SelectionReason>();
-  const pending: Array<{ readonly item: SystemItem; readonly path: readonly string[] }> = [];
+  const pending: PendingSelection[] = [];
 
   for (const item of items) {
     const reason = getDirectSelectionReason(item, options);
@@ -81,19 +89,15 @@ export const analyzeSelection = (
     pending.push({ item, path: [item.name] });
   }
 
-  if (pending.length === 0) {
-    return {
-      itemMap,
-      matchedNames,
-      options,
-      reasons,
-      selectedItems: [],
-      selectedNames: new Set<string>(),
-    };
-  }
+  return { matchedNames, pending, reasons };
+};
 
-  const selectedNames = new Set(matchedNames);
-
+const expandDependencySelections = (
+  pending: PendingSelection[],
+  itemMap: ReadonlyMap<string, SystemItem>,
+  selectedNames: Set<string>,
+  reasons: Map<string, SelectionReason>,
+): void => {
   while (pending.length > 0) {
     const current = pending.pop();
     if (!current?.item.dependsOn) {
@@ -120,12 +124,39 @@ export const analyzeSelection = (
       pending.push({ item: dependency, path: dependencyPath });
     }
   }
+};
+
+export const analyzeSelection = (
+  items: readonly SystemItem[],
+  options: SelectionOptions,
+): SelectionAnalysis => {
+  const itemMap = new Map(items.map((item) => [item.name, item]));
+  const directSelections = collectDirectSelections(items, options);
+
+  if (directSelections.pending.length === 0) {
+    return {
+      itemMap,
+      matchedNames: directSelections.matchedNames,
+      options,
+      reasons: directSelections.reasons,
+      selectedItems: [],
+      selectedNames: new Set<string>(),
+    };
+  }
+
+  const selectedNames = new Set(directSelections.matchedNames);
+  expandDependencySelections(
+    directSelections.pending,
+    itemMap,
+    selectedNames,
+    directSelections.reasons,
+  );
 
   return {
     itemMap,
-    matchedNames,
+    matchedNames: directSelections.matchedNames,
     options,
-    reasons,
+    reasons: directSelections.reasons,
     selectedItems: items.filter((item) => selectedNames.has(item.name)),
     selectedNames,
   };

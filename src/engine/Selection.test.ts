@@ -48,6 +48,17 @@ describe("selectItems", () => {
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "ffmpeg"]);
   });
 
+  it("returns an empty selection when filters match nothing", () => {
+    const items = [makeItem("ffmpeg", { tags: ["media"] })];
+
+    const selection = analyzeSelection(items, { only: ["ripgrep"], tags: ["dev"] });
+
+    expect(selection.selectedItems).toEqual([]);
+    expect(selection.selectedNames.size).toBe(0);
+    expect(selection.matchedNames.size).toBe(0);
+    expect(selection.reasons.size).toBe(0);
+  });
+
   it("includes transitive dependencies", () => {
     const items = [
       makeItem("homebrew"),
