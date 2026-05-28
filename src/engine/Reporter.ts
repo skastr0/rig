@@ -42,6 +42,137 @@ const printPreview = (
   }
 };
 
+type ReporterColors = typeof colors;
+type ReporterLog = (message: string) => void;
+
+interface ProgressDisplay {
+  readonly icon: string;
+  readonly color: string;
+  readonly actionText: string;
+}
+
+const progressDisplayFor = (
+  result: Pick<ExecutionResult, "action" | "status">,
+  c: ReporterColors,
+): ProgressDisplay => {
+  switch (result.action) {
+    case "installed":
+      return { icon: symbols.check, color: c.green, actionText: "installed" };
+    case "updated":
+      return { icon: symbols.check, color: c.green, actionText: "updated" };
+    case "would_update":
+      return { icon: symbols.dot, color: c.yellow, actionText: "would update" };
+    case "skipped":
+      return result.status === "installed"
+        ? { icon: symbols.check, color: c.dim, actionText: "already installed" }
+        : { icon: symbols.dot, color: c.yellow, actionText: "would install" };
+    case "timed_out":
+      return { icon: symbols.cross, color: c.red, actionText: "timed out" };
+    case "blocked":
+      return { icon: symbols.dot, color: c.yellow, actionText: "blocked by dependency" };
+    case "failed":
+      return { icon: symbols.cross, color: c.red, actionText: "failed" };
+  }
+};
+
+const formatBackupInfo = (backedUp: string | undefined, c: ReporterColors): string =>
+  backedUp ? ` ${c.dim}(backed up)${c.reset}` : "";
+
+const formatDetailInfo = (detail: string | undefined, c: ReporterColors): string =>
+  detail ? ` ${c.dim}(${detail})${c.reset}` : "";
+
+const actionsWithFailureReasons = new Set<ExecutionResult["action"]>([
+  "failed",
+  "timed_out",
+  "blocked",
+]);
+
+const printsFailureReason = (action: ExecutionResult["action"]): boolean =>
+  actionsWithFailureReasons.has(action);
+
+interface InspectionStatusDisplay {
+  readonly icon: string;
+  readonly color: string;
+  readonly label: string;
+  readonly includeDetail: boolean;
+}
+
+const inspectionStatusDisplayFor = (
+  status: InspectionResult["status"],
+  c: ReporterColors,
+): InspectionStatusDisplay => {
+  switch (status) {
+    case "installed":
+      return { icon: symbols.check, color: c.green, label: "installed", includeDetail: true };
+    case "missing":
+      return { icon: symbols.dot, color: c.yellow, label: "missing", includeDetail: true };
+    case "updateable":
+      return { icon: symbols.arrow, color: c.cyan, label: "updateable", includeDetail: true };
+    case "blocked":
+      return { icon: symbols.dot, color: c.yellow, label: "blocked", includeDetail: false };
+    case "error":
+      return { icon: symbols.cross, color: c.red, label: "error", includeDetail: false };
+  }
+};
+
+interface InspectionGroups {
+  readonly installed: readonly InspectionResult[];
+  readonly missing: readonly InspectionResult[];
+  readonly updateable: readonly InspectionResult[];
+  readonly blocked: readonly InspectionResult[];
+  readonly errored: readonly InspectionResult[];
+}
+
+const groupInspectionResults = (results: readonly InspectionResult[]): InspectionGroups => ({
+  installed: results.filter((result) => result.status === "installed"),
+  missing: results.filter((result) => result.status === "missing"),
+  updateable: results.filter((result) => result.status === "updateable"),
+  blocked: results.filter((result) => result.status === "blocked"),
+  errored: results.filter((result) => result.status === "error"),
+});
+
+const printInspectionRow = (
+  result: InspectionResult,
+  c: ReporterColors,
+  log: ReporterLog,
+): void => {
+  const display = inspectionStatusDisplayFor(result.status, c);
+  const detailInfo = display.includeDetail ? formatDetailInfo(result.detail, c) : "";
+
+  log(
+    `  ${display.color}${display.icon}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} ${display.label}${detailInfo}`,
+  );
+
+  if (result.reason) {
+    log(`    ${c.dim}${symbols.arrow}${c.reset} ${result.reason}`);
+  }
+};
+
+const printSummaryCount = (
+  count: number,
+  display: Pick<InspectionStatusDisplay, "color" | "icon" | "label">,
+  c: ReporterColors,
+  log: ReporterLog,
+): void => {
+  if (count > 0) {
+    log(`  ${display.color}${display.icon}${c.reset} ${count} ${display.label}`);
+  }
+};
+
+const printStatusSummary = (
+  groups: InspectionGroups,
+  c: ReporterColors,
+  log: ReporterLog,
+): void => {
+  log(`\n${c.bold}Status Summary:${c.reset}`);
+  printSummaryCount(groups.installed.length, inspectionStatusDisplayFor("installed", c), c, log);
+  printSummaryCount(groups.missing.length, inspectionStatusDisplayFor("missing", c), c, log);
+  printSummaryCount(groups.updateable.length, inspectionStatusDisplayFor("updateable", c), c, log);
+  printSummaryCount(groups.blocked.length, inspectionStatusDisplayFor("blocked", c), c, log);
+  printSummaryCount(groups.errored.length, inspectionStatusDisplayFor("error", c), c, log);
+  log("");
+};
+
 export interface Reporter {
   readonly printConfigSource: (source: ConfigSource, executionMode?: ExecutionMode) => void;
   readonly printPlan: (plan: PlanResult, dryRun?: boolean) => void;
@@ -132,70 +263,21 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   };
 
   const printProgress = (result: ExecutionResult) => {
-    const { name, status, action, backed_up, detail, preview, error } = result;
-
-    let statusIcon: string;
-    let statusColor: string;
-    let actionText: string;
-
-    switch (action) {
-      case "installed":
-        statusIcon = symbols.check;
-        statusColor = c.green;
-        actionText = "installed";
-        break;
-      case "updated":
-        statusIcon = symbols.check;
-        statusColor = c.green;
-        actionText = "updated";
-        break;
-      case "would_update":
-        statusIcon = symbols.dot;
-        statusColor = c.yellow;
-        actionText = "would update";
-        break;
-      case "skipped":
-        if (status === "installed") {
-          statusIcon = symbols.check;
-          statusColor = c.dim;
-          actionText = "already installed";
-        } else {
-          statusIcon = symbols.dot;
-          statusColor = c.yellow;
-          actionText = "would install";
-        }
-        break;
-      case "timed_out":
-        statusIcon = symbols.cross;
-        statusColor = c.red;
-        actionText = "timed out";
-        break;
-      case "blocked":
-        statusIcon = symbols.dot;
-        statusColor = c.yellow;
-        actionText = "blocked by dependency";
-        break;
-      case "failed":
-        statusIcon = symbols.cross;
-        statusColor = c.red;
-        actionText = "failed";
-        break;
-    }
-
-    const backupInfo = backed_up ? ` ${c.dim}(backed up)${c.reset}` : "";
-    const detailInfo = detail ? ` ${c.dim}(${detail})${c.reset}` : "";
+    const display = progressDisplayFor(result, c);
+    const backupInfo = formatBackupInfo(result.backed_up, c);
+    const detailInfo = formatDetailInfo(result.detail, c);
 
     console.log(
-      `  ${statusColor}${statusIcon}${c.reset} ${name} ${c.dim}${symbols.arrow}${c.reset} ${actionText}${backupInfo}${detailInfo}`,
+      `  ${display.color}${display.icon}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} ${display.actionText}${backupInfo}${detailInfo}`,
     );
 
-    if (preview) {
-      printPreview(preview, c, console.log);
+    if (result.preview) {
+      printPreview(result.preview, c, console.log);
     }
 
-    if (action === "failed" || action === "timed_out" || action === "blocked") {
+    if (printsFailureReason(result.action)) {
       console.log(
-        `    ${statusColor}${symbols.arrow}${c.reset} Reason: ${formatFailureReason(error)}`,
+        `    ${display.color}${symbols.arrow}${c.reset} Reason: ${formatFailureReason(result.error)}`,
       );
     }
   };
@@ -267,69 +349,15 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   };
 
   const printStatus = (results: readonly InspectionResult[]) => {
-    const installed = results.filter((result) => result.status === "installed");
-    const missing = results.filter((result) => result.status === "missing");
-    const updateable = results.filter((result) => result.status === "updateable");
-    const blocked = results.filter((result) => result.status === "blocked");
-    const errored = results.filter((result) => result.status === "error");
+    const groups = groupInspectionResults(results);
 
     console.log(`\n${c.bold}Status:${c.reset}\n`);
 
     for (const result of results) {
-      const detailInfo = result.detail ? ` ${c.dim}(${result.detail})${c.reset}` : "";
-
-      switch (result.status) {
-        case "installed":
-          console.log(
-            `  ${c.green}${symbols.check}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} installed${detailInfo}`,
-          );
-          break;
-        case "missing":
-          console.log(
-            `  ${c.yellow}${symbols.dot}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} missing${detailInfo}`,
-          );
-          break;
-        case "updateable":
-          console.log(
-            `  ${c.cyan}${symbols.arrow}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} updateable${detailInfo}`,
-          );
-          break;
-        case "blocked":
-          console.log(
-            `  ${c.yellow}${symbols.dot}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} blocked`,
-          );
-          break;
-        case "error":
-          console.log(
-            `  ${c.red}${symbols.cross}${c.reset} ${result.name} ${c.dim}${symbols.arrow}${c.reset} error`,
-          );
-          break;
-      }
-
-      if (result.reason) {
-        console.log(`    ${c.dim}${symbols.arrow}${c.reset} ${result.reason}`);
-      }
+      printInspectionRow(result, c, console.log);
     }
 
-    console.log(`\n${c.bold}Status Summary:${c.reset}`);
-
-    if (installed.length > 0) {
-      console.log(`  ${c.green}${symbols.check}${c.reset} ${installed.length} installed`);
-    }
-    if (missing.length > 0) {
-      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${missing.length} missing`);
-    }
-    if (updateable.length > 0) {
-      console.log(`  ${c.cyan}${symbols.arrow}${c.reset} ${updateable.length} updateable`);
-    }
-    if (blocked.length > 0) {
-      console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${blocked.length} blocked`);
-    }
-    if (errored.length > 0) {
-      console.log(`  ${c.red}${symbols.cross}${c.reset} ${errored.length} error`);
-    }
-
-    console.log("");
+    printStatusSummary(groups, c, console.log);
   };
 
   const printWhy = (report: WhyReport) => {

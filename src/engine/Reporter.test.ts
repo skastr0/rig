@@ -407,6 +407,26 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("1 updateable"))).toBe(true);
       expect(output.some((line) => line.includes("1 blocked"))).toBe(true);
     });
+
+    it("should print error status rows with reason and summary count", () => {
+      const reporter = createReporter({ noColor: true });
+
+      const results: InspectionResult[] = [
+        {
+          name: "homebrew",
+          status: "error",
+          detail: "internal detail is omitted for error rows",
+          reason: "Check command failed: permission denied",
+        },
+      ];
+
+      reporter.printStatus(results);
+
+      expect(output.some((line) => line.includes("homebrew") && line.includes("error"))).toBe(true);
+      expect(output.some((line) => line.includes("Check command failed"))).toBe(true);
+      expect(output.some((line) => line.includes("1 error"))).toBe(true);
+      expect(output.some((line) => line.includes("internal detail"))).toBe(false);
+    });
   });
 
   describe("printWhy", () => {
