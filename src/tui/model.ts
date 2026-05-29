@@ -38,6 +38,11 @@ export interface TuiLogLine {
   readonly itemName?: string;
 }
 
+export interface FilterableOption {
+  readonly name: string;
+  readonly description?: string;
+}
+
 const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
   `${count} ${count === 1 ? singular : plural}`;
 
@@ -138,6 +143,89 @@ export const formatExecutionPreviewLogs = (result: ExecutionResult): readonly st
     `${result.name}: ${result.preview.label}`,
     ...result.preview.steps.map((step) => `${result.name}: ${step}`),
   ];
+};
+
+export const filterOptions = <TOption extends FilterableOption>(
+  options: readonly TOption[],
+  query: string,
+): TOption[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (normalizedQuery.length === 0) {
+    return [...options];
+  }
+
+  return options.filter((option) => {
+    const haystack = `${option.name} ${option.description ?? ""}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+};
+
+const dependencyTreeRoots = (summary: SelectionSummary): readonly SystemItem[] =>
+  summary.analysis.selectedItems.filter(
+    (item) => summary.analysis.reasons.get(item.name)?.type === "direct",
+  );
+
+const dependencyChildren = (
+  item: SystemItem,
+  selectedItemMap: ReadonlyMap<string, SystemItem>,
+): readonly SystemItem[] =>
+  (item.dependsOn ?? []).flatMap((dependencyName) => {
+    const dependency = selectedItemMap.get(dependencyName);
+    return dependency ? [dependency] : [];
+  });
+
+const formatTreeItem = (
+  item: SystemItem,
+  summary: SelectionSummary,
+  expanded: Set<string>,
+  ancestors: ReadonlySet<string>,
+  prefix: string,
+  isLast: boolean,
+): readonly string[] => {
+  const connector = isLast ? "\\- " : "+- ";
+  const reason = formatReasonBadge(summary.analysis.reasons.get(item.name));
+  const status = ancestors.has(item.name) ? "cycle" : expanded.has(item.name) ? "shared" : reason;
+  const line = `${prefix}${connector}${item.name} (${status})`;
+
+  if (ancestors.has(item.name) || expanded.has(item.name)) {
+    return [line];
+  }
+
+  expanded.add(item.name);
+
+  const childPrefix = `${prefix}${isLast ? "   " : "|  "}`;
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(item.name);
+  const children = dependencyChildren(item, summary.analysis.itemMap);
+
+  return [
+    line,
+    ...children.flatMap((child, index) =>
+      formatTreeItem(
+        child,
+        summary,
+        expanded,
+        nextAncestors,
+        childPrefix,
+        index === children.length - 1,
+      ),
+    ),
+  ];
+};
+
+export const formatDependencyTreeLines = (summary: SelectionSummary): readonly string[] => {
+  if (summary.analysis.selectedItems.length === 0) {
+    return ["No items selected for this profile/tag set."];
+  }
+
+  const roots = dependencyTreeRoots(summary);
+  const expanded = new Set<string>();
+  const treeLines = roots.flatMap((root, index) =>
+    formatTreeItem(root, summary, expanded, new Set(), "", index === roots.length - 1),
+  );
+
+  return [`Dependency tree (${summary.analysis.selectedItems.length} items)`, ...treeLines];
 };
 
 export const filterLogsByItem = (

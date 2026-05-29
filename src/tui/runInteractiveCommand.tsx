@@ -10,8 +10,10 @@ import { AppHeader, DetailsPane, Footer, SelectorPane } from "./components.js";
 import {
   buildProfileRows,
   buildTagRows,
+  filterOptions,
   filterLogsByItem,
   formatReasonBadge,
+  formatDependencyTreeLines,
   getItemPreviewLines,
   summarizeSelection,
   type TuiLogLine,
@@ -86,6 +88,8 @@ function InteractiveRigApp({
   const [update, setUpdate] = useState(options.update);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<readonly TuiLogLine[]>([]);
+  const [filterActive, setFilterActive] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
   const runningRef = useRef(false);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const runDisabledReason = getRunDisabledReason(configSource, options);
@@ -110,11 +114,11 @@ function InteractiveRigApp({
     () => buildTagRows(items, selectedProfile, selectedTags),
     [items, selectedProfile, selectedTags],
   );
-  const selectionSummary = useMemo(
+  const executionSummary = useMemo(
     () => summarizeSelection(items, selectedProfile, selectedTagNames, options.only),
     [items, options.only, selectedProfile, selectedTagNames],
   );
-  const selectedItems = selectionSummary.analysis.selectedItems;
+  const selectedItems = executionSummary.analysis.selectedItems;
   const itemOptions = useMemo<SelectOption[]>(
     () => [
       {
@@ -124,14 +128,14 @@ function InteractiveRigApp({
       },
       ...selectedItems.map((item) => ({
         name: item.name,
-        description: formatReasonBadge(selectionSummary.analysis.reasons.get(item.name)),
+        description: formatReasonBadge(executionSummary.analysis.reasons.get(item.name)),
         value: item.name,
       })),
     ],
-    [selectedItems, selectionSummary.analysis.reasons],
+    [executionSummary.analysis.reasons, selectedItems],
   );
 
-  const selectOptions = useMemo<SelectOption[]>(() => {
+  const baseSelectOptions = useMemo<SelectOption[]>(() => {
     switch (stage) {
       case "profile":
         return buildProfileOptions(items);
@@ -147,22 +151,39 @@ function InteractiveRigApp({
         return itemOptions;
     }
   }, [itemOptions, items, stage, tagRows]);
+  const selectOptions = useMemo(
+    () => filterOptions(baseSelectOptions, filterQuery),
+    [baseSelectOptions, filterQuery],
+  );
+  const selectedOption = selectOptions[selectedIndex];
 
   useEffect(() => {
     setSelectedIndex((current) => clampIndex(current, selectOptions.length));
   }, [selectOptions.length]);
 
+  const highlightedProfile =
+    stage === "profile"
+      ? ((selectedOption?.value as string | undefined) ?? selectedProfile)
+      : selectedProfile;
+  const previewTagNames = stage === "profile" ? [] : selectedTagNames;
+  const previewSummary = useMemo(
+    () => summarizeSelection(items, highlightedProfile, previewTagNames, options.only),
+    [highlightedProfile, items, options.only, previewTagNames],
+  );
+
   const selectedItemName =
     stage === "review" || stage === "running" || stage === "done"
-      ? ((itemOptions[selectedIndex]?.value as string | undefined) ?? undefined)
+      ? ((selectedOption?.value as string | undefined) ?? undefined)
       : undefined;
   const selectedItemReason = selectedItemName
-    ? selectionSummary.analysis.reasons.get(selectedItemName)
+    ? executionSummary.analysis.reasons.get(selectedItemName)
     : undefined;
   const selectedItem = selectedItemName
-    ? selectionSummary.analysis.itemMap.get(selectedItemName)
+    ? executionSummary.analysis.itemMap.get(selectedItemName)
     : undefined;
   const itemPreviewLines = getItemPreviewLines(selectedItem, update);
+  const idlePreviewLines =
+    itemPreviewLines.length > 0 ? itemPreviewLines : formatDependencyTreeLines(previewSummary);
   const visibleLogs = filterLogsByItem(logs, selectedItemName);
 
   const appendLog = useCallback((line: PendingLogLine) => {
@@ -198,7 +219,14 @@ function InteractiveRigApp({
     }
 
     if (stage === "profile") {
-      setSelectedProfileIndex(selectedIndex);
+      const profileName = selectedOption?.value as string | undefined;
+      const profileIndex = profileRows.findIndex((profile) => profile.name === profileName);
+
+      if (profileIndex < 0) {
+        return;
+      }
+
+      setSelectedProfileIndex(profileIndex);
       setStage("tags");
       setSelectedIndex(0);
       return;
@@ -208,14 +236,14 @@ function InteractiveRigApp({
       setStage("review");
       setSelectedIndex(0);
     }
-  }, [running, selectedIndex, stage]);
+  }, [profileRows, running, selectedOption?.value, stage]);
 
   const toggleTag = useCallback(() => {
     if (running || stage !== "tags") {
       return;
     }
 
-    const tag = tagRows[selectedIndex]?.name;
+    const tag = selectedOption?.value as string | undefined;
     if (!tag) {
       return;
     }
@@ -229,7 +257,7 @@ function InteractiveRigApp({
       }
       return next;
     });
-  }, [running, selectedIndex, stage, tagRows]);
+  }, [running, selectedOption?.value, stage]);
 
   const finishRun = useCallback(() => {
     runningRef.current = false;
@@ -319,7 +347,7 @@ function InteractiveRigApp({
   }, [appendLog]);
 
   useRigKeyboard(
-    { running, stage },
+    { running, stage, filterActive, filterQuery },
     {
       exit: onExit,
       cancel: cancelRun,
@@ -329,6 +357,14 @@ function InteractiveRigApp({
       toggleUpdate: () => setUpdate((current) => !current),
       preview: () => startRun(true),
       run: () => startRun(false),
+      startFilter: () => setFilterActive(true),
+      finishFilter: () => setFilterActive(false),
+      clearFilter: () => {
+        setFilterQuery("");
+        setFilterActive(false);
+      },
+      appendFilter: (character) => setFilterQuery((current) => `${current}${character}`),
+      deleteFilter: () => setFilterQuery((current) => current.slice(0, -1)),
     },
   );
 
@@ -358,7 +394,13 @@ function InteractiveRigApp({
 
       <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
         <SelectorPane
-          stageTitle={stageTitle}
+          stageTitle={
+            filterQuery.length > 0
+              ? `${stageTitle} / filter: ${filterQuery}`
+              : filterActive
+                ? `${stageTitle} / filter`
+                : stageTitle
+          }
           options={selectOptions}
           selectedIndex={selectedIndex}
           onChange={setSelectedIndex}
@@ -367,12 +409,12 @@ function InteractiveRigApp({
 
         <DetailsPane
           stage={stage}
-          profile={selectedProfile}
-          tags={selectedTagNames}
+          profile={highlightedProfile}
+          tags={previewTagNames}
           only={options.only}
-          selectedCount={selectedItems.length}
-          directCount={selectionSummary.directCount}
-          dependencyCount={selectionSummary.dependencyCount}
+          selectedCount={previewSummary.analysis.selectedItems.length}
+          directCount={previewSummary.directCount}
+          dependencyCount={previewSummary.dependencyCount}
           running={running}
           update={update}
           verbose={verbose}
@@ -380,7 +422,7 @@ function InteractiveRigApp({
           runDisabledReason={runDisabledReason}
           selectedItemName={selectedItemName}
           selectedItemReason={selectedItemReason}
-          itemPreviewLines={itemPreviewLines}
+          itemPreviewLines={idlePreviewLines}
           logs={visibleLogs}
         />
       </box>
@@ -391,6 +433,8 @@ function InteractiveRigApp({
         update={update}
         canRun={canRun}
         runDisabledReason={runDisabledReason}
+        filterActive={filterActive}
+        filterQuery={filterQuery}
       />
     </box>
   );

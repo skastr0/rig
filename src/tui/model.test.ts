@@ -3,7 +3,9 @@ import type { SystemItem } from "../schema/config.js";
 import {
   buildProfileRows,
   buildTagRows,
+  filterOptions,
   filterLogsByItem,
+  formatDependencyTreeLines,
   formatReasonBadge,
   summarizeSelection,
 } from "./model.js";
@@ -105,5 +107,50 @@ describe("TUI model", () => {
 
     expect(filterLogsByItem(logs, "ripgrep")).toEqual([logs[0], logs[2]]);
     expect(filterLogsByItem(logs, undefined)).toEqual(logs);
+  });
+
+  it("filters selector options by name or description", () => {
+    const options = [
+      { name: "macbook", description: "Daily workstation" },
+      { name: "server-home", description: "Matrix services" },
+    ];
+
+    expect(filterOptions(options, "matrix")).toEqual([options[1]]);
+    expect(filterOptions(options, "MAC")).toEqual([options[0]]);
+    expect(filterOptions(options, "")).toEqual(options);
+  });
+
+  it("formats selected items as a dependency tree", () => {
+    const summary = summarizeSelection(
+      [
+        makeItem("homebrew", { profiles: ["server-home"], tags: ["brew"] }),
+        makeItem("orbstack", {
+          profiles: ["server-home"],
+          tags: ["containers"],
+          dependsOn: ["homebrew"],
+        }),
+        makeItem("tailscale", {
+          profiles: ["server-home"],
+          tags: ["networking"],
+          dependsOn: ["homebrew"],
+        }),
+        makeItem("continuwuity", {
+          profiles: ["server-home"],
+          tags: ["server"],
+          dependsOn: ["orbstack", "tailscale"],
+        }),
+      ],
+      "server-home",
+      ["server"],
+    );
+
+    expect(formatDependencyTreeLines(summary)).toEqual([
+      "Dependency tree (4 items)",
+      "\\- continuwuity (direct)",
+      "   +- orbstack (dependency)",
+      "   |  \\- homebrew (dependency)",
+      "   \\- tailscale (dependency)",
+      "      \\- homebrew (shared)",
+    ]);
   });
 });

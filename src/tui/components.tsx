@@ -40,6 +40,8 @@ interface FooterProps {
   readonly update: boolean;
   readonly canRun: boolean;
   readonly runDisabledReason: string | undefined;
+  readonly filterActive: boolean;
+  readonly filterQuery: string;
 }
 
 interface LogStreamProps {
@@ -66,7 +68,7 @@ const logColorFor = (kind: TuiLogLine["kind"]): string => {
 };
 
 function LogStream({ stage, previewLines, logs }: LogStreamProps) {
-  const showReviewPreview = stage === "review" && logs.length === 0 && previewLines.length > 0;
+  const showIdlePreview = logs.length === 0 && previewLines.length > 0;
 
   return (
     <scrollbox
@@ -81,7 +83,7 @@ function LogStream({ stage, previewLines, logs }: LogStreamProps) {
         padding: 1,
       }}
     >
-      {showReviewPreview ? (
+      {showIdlePreview ? (
         previewLines.map((line, index) => (
           <text key={index} fg={index === 0 ? palette.amber : palette.text} wrapMode="word">
             {line}
@@ -89,7 +91,7 @@ function LogStream({ stage, previewLines, logs }: LogStreamProps) {
         ))
       ) : logs.length === 0 ? (
         <text fg={palette.muted} wrapMode="word">
-          {stage === "review"
+          {stage === "review" || stage === "profile" || stage === "tags"
             ? "Select an item to inspect install/update commands. Press p to preview."
             : "No logs yet."}
         </text>
@@ -214,8 +216,22 @@ export function DetailsPane({
   );
 }
 
-export function Footer({ running, verbose, update, canRun, runDisabledReason }: FooterProps) {
+export function Footer({
+  running,
+  verbose,
+  update,
+  canRun,
+  runDisabledReason,
+  filterActive,
+  filterQuery,
+}: FooterProps) {
   const runHint = canRun ? "r run" : `r disabled (${runDisabledReason ?? "preview-only"})`;
+  const filterHint =
+    filterQuery.length > 0
+      ? `g filter [${filterQuery}]`
+      : filterActive
+        ? "g filter [typing]"
+        : "g filter";
 
   return (
     <box
@@ -229,7 +245,7 @@ export function Footer({ running, verbose, update, canRun, runDisabledReason }: 
       }}
     >
       <text fg={palette.amber} wrapMode="word">
-        {`enter next/select | space tag | p preview | ${runHint} | b back | q quit
+        {`enter next/select | space tag | ${filterHint} | p preview | ${runHint} | b/esc/backspace back | q quit
 v verbose [${verbose ? "x" : " "}] | u update [${update ? "x" : " "}] | ${
           running ? "q/ctrl-c cancel run" : "profile -> tags -> preview/run"
         }`}
