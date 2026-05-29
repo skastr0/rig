@@ -20,7 +20,7 @@ rig is an experimental, solo-maintained project. The most useful outside help is
 Install dependencies with Bun, then run the same validation gates used by CI:
 
 ```bash
-bun install --frozen-lockfile
+bun install --frozen-lockfile --cpu='*' --os='*'
 bun run validate
 bun run test
 bun run build

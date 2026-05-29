@@ -36,7 +36,7 @@ Do not make the repository public or publish artifacts until these are complete:
 ## Local Preflight
 
 ```bash
-bun install --frozen-lockfile
+bun install --frozen-lockfile --cpu='*' --os='*'
 bun run validate
 bun run test
 bun run build
