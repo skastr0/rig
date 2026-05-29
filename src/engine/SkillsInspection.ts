@@ -29,7 +29,6 @@ const GLOBAL_SKILLS_PATH_BY_AGENT = new Map<string, string>([
   ["deepagents", "~/.deepagents/agent/skills"],
   ["droid", "~/.factory/skills"],
   ["firebender", "~/.firebender/skills"],
-  ["gemini-cli", "~/.gemini/skills"],
   ["github-copilot", "~/.copilot/skills"],
   ["goose", "~/.config/goose/skills"],
   ["iflow-cli", "~/.iflow/skills"],
