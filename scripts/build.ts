@@ -20,16 +20,31 @@ mkdirSync(distDir, { recursive: true });
 
 console.log(`\nBuilding rig v${version}...\n`);
 
+const failedTargets: string[] = [];
+
 for (const target of targets) {
   const outfile = join(distDir, `rig-${target.platform}-${target.arch}`);
+  const targetLabel = `${target.platform}-${target.arch}`;
+
   console.log(`Building ${target.platform}-${target.arch}...`);
   try {
     await compile(target, outfile);
     const { stdout } = await Bun.$`du -h ${outfile}`.quiet();
     console.log(`  ${outfile} (${stdout.toString().split("\t")[0]})`);
   } catch (error) {
-    console.error(`  Error building ${target.platform}-${target.arch}:`, error);
+    failedTargets.push(targetLabel);
+    console.error(`  Error building ${targetLabel}:`, error);
   }
+}
+
+if (failedTargets.length > 0) {
+  console.error(`
+Build failed for: ${failedTargets.join(", ")}
+
+If OpenTUI native packages are missing for cross-target builds, run:
+  bun install --cpu='*' --os='*'
+`);
+  process.exit(1);
 }
 
 console.log(`

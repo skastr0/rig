@@ -15,6 +15,7 @@ import {
 import { ConfigError, ValidationError } from "./errors.js";
 import { formatError } from "./errorFormatting.js";
 import type { SystemItem } from "./schema/config.js";
+import { runInteractiveCommand } from "./tui/runInteractiveCommand.js";
 
 const formatItemList = (items: readonly string[]): string => items.join(", ");
 
@@ -312,6 +313,23 @@ const runConfiguredCommand = (
     yield* runExecutionCommand(options, executor, reporter, plan, context.executionMode);
   });
 
+const isInteractiveTerminal = (): boolean =>
+  process.stdin.isTTY === true && process.stdout.isTTY === true;
+
+const runInteractiveCommandIfRequested = (options: CliOptions, configService: ConfigService) =>
+  Effect.gen(function* () {
+    if (options.ci || !isInteractiveTerminal()) {
+      return false;
+    }
+
+    const configSource = yield* resolveConfigSource(options.config);
+    const config = yield* configService.load(configSource);
+
+    yield* runInteractiveCommand({ options, configSource, items: config.items });
+
+    return true;
+  });
+
 const exitWithMessage = (message: string) =>
   Effect.sync(() => {
     console.error(`\n${message}\n`);
@@ -325,6 +343,11 @@ const createHandlerEffect = (options: CliOptions) =>
 
     if (options.init) {
       yield* runInitCommand(options, configService);
+      return;
+    }
+
+    const handledInteractively = yield* runInteractiveCommandIfRequested(options, configService);
+    if (handledInteractively) {
       return;
     }
 
