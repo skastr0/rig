@@ -8,13 +8,18 @@ import { Executor } from "./engine/Executor.js";
 import { createReporter, type Reporter, type WhyReport } from "./engine/Reporter.js";
 import {
   analyzeSelection,
+  collectAvailableProfiles,
   type SelectionAnalysis,
   type SelectionReason,
 } from "./engine/Selection.js";
 import { ConfigError, ValidationError } from "./errors.js";
 import { formatError } from "./errorFormatting.js";
+import type { SystemItem } from "./schema/config.js";
 
 const formatItemList = (items: readonly string[]): string => items.join(", ");
+
+const formatAvailableProfiles = (profiles: readonly string[]): string =>
+  profiles.length === 0 ? "none" : formatItemList(profiles);
 
 const printInitSuccess = (path: string, docsPath: string): void => {
   console.log(`\nCreated starter config at ${path}`);
@@ -28,12 +33,12 @@ const formatSelectionReason = (
   selection: SelectionAnalysis,
 ): readonly string[] => {
   switch (reason.type) {
-    case "default":
-      return ["Selected by default because no --only or --tags filters are active."];
-    case "filter": {
+    case "direct": {
       const clauses: string[] = [];
 
-      if (reason.onlyMatched) {
+      clauses.push(`it belongs to profile "${reason.profile}"`);
+
+      if (reason.matchedOnly) {
         clauses.push(`it matched --only (${itemName})`);
       }
 
@@ -65,6 +70,10 @@ const formatSelectionReason = (
         lines.push(`Root selected item: ${rootSelection}`);
       }
 
+      if (reason.crossesProfile) {
+        lines.push(`Included across profile boundaries from "${reason.rootProfile}".`);
+      }
+
       return lines;
     }
   }
@@ -81,19 +90,22 @@ const formatWhyNotSelected = (
     return lines;
   }
 
+  if (!item.profiles.includes(selection.options.profile)) {
+    lines.push(
+      `Item profiles (${formatItemList(item.profiles)}) do not include active profile "${selection.options.profile}".`,
+    );
+  }
+
   if (selection.options.only.length > 0 && !selection.options.only.includes(itemName)) {
     lines.push(`--only currently selects: ${formatItemList(selection.options.only)}`);
   }
 
   if (selection.options.tags.length > 0) {
-    const itemTags = item.tags ?? [];
-    const matchingTags = itemTags.filter((tag) => selection.options.tags.includes(tag));
+    const matchingTags = item.tags.filter((tag) => selection.options.tags.includes(tag));
 
     if (matchingTags.length === 0) {
       lines.push(
-        itemTags.length === 0
-          ? `Item has no tags, so it cannot match --tags: ${formatItemList(selection.options.tags)}`
-          : `Item tags (${formatItemList(itemTags)}) do not match --tags: ${formatItemList(selection.options.tags)}`,
+        `Item tags (${formatItemList(item.tags)}) do not match --tags: ${formatItemList(selection.options.tags)}`,
       );
     }
   }
@@ -126,6 +138,43 @@ const buildWhyReport = (
       ? formatSelectionReason(itemName, reason, selection)
       : formatWhyNotSelected(itemName, selection),
   });
+};
+
+const requireHeadlessProfile = (
+  options: CliOptions,
+  items: readonly SystemItem[],
+): Effect.Effect<string, ValidationError> => {
+  const availableProfiles = collectAvailableProfiles(items);
+  const availableProfilesLine = `Available profiles: ${formatAvailableProfiles(availableProfiles)}.`;
+
+  if (!options.ci) {
+    return Effect.fail(
+      new ValidationError({
+        issues: [
+          "Interactive mode is the default for bare rig. Use --ci --profile <name> for headless execution.",
+          availableProfilesLine,
+        ],
+      }),
+    );
+  }
+
+  if (options.profile === undefined) {
+    return Effect.fail(
+      new ValidationError({
+        issues: [`Headless mode requires --profile <name>.`, availableProfilesLine],
+      }),
+    );
+  }
+
+  if (!availableProfiles.includes(options.profile)) {
+    return Effect.fail(
+      new ValidationError({
+        issues: [`Unknown profile "${options.profile}".`, availableProfilesLine],
+      }),
+    );
+  }
+
+  return Effect.succeed(options.profile);
 };
 
 const runInitCommand = (options: CliOptions, configService: ConfigService) =>
@@ -163,12 +212,17 @@ const loadSelectionContext = (
 
     reporter.printConfigSource(configSource, executionMode);
 
-    const config = yield* configService.load(configSource, options.profile);
+    const config = yield* configService.load(configSource);
+    const profile = yield* requireHeadlessProfile(options, config.items);
 
     return {
       executionMode,
       readOnlyIntrospection,
-      selection: analyzeSelection(config.items, options),
+      selection: analyzeSelection(config.items, {
+        profile,
+        tags: options.tags,
+        only: options.only,
+      }),
     };
   });
 

@@ -1,10 +1,11 @@
-import { Args, Command, Options } from "@effect/cli";
+import { Args, CliApp, Command, Options, ValidationError as CliValidationError } from "@effect/cli";
 import { Effect, Option } from "effect";
 import { defaultConfigSource, defaultGitHubConfigPath } from "./configSource.js";
 
 export interface CliOptions {
   readonly config: string;
   readonly profile: string | undefined;
+  readonly ci: boolean;
   readonly init: boolean;
   readonly dryRun: boolean;
   readonly apply: boolean;
@@ -28,7 +29,11 @@ const config = Options.optional(Options.text("config").pipe(Options.withAlias("c
 );
 
 const profile = Options.optional(Options.text("profile").pipe(Options.withAlias("p"))).pipe(
-  Options.withDescription("Profile to apply (e.g., 'work', 'personal')"),
+  Options.withDescription("Profile/topology surface to apply in headless mode"),
+);
+
+const ci = Options.boolean("ci").pipe(
+  Options.withDescription("Run non-interactively; requires --profile <name>"),
 );
 
 const init = Options.boolean("init").pipe(
@@ -90,6 +95,7 @@ const cliOptions = {
   source,
   config,
   profile,
+  ci,
   init,
   dryRun,
   apply,
@@ -116,11 +122,14 @@ const resolveConfigInput = (
   return defaultConfigSource;
 };
 
-export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
+export const makeCommand = <E, R>(
+  handler: (options: CliOptions) => Effect.Effect<void, E, R>,
+): Command.Command<"rig", R, E, Command.Command.ParseConfig<typeof cliOptions>> =>
   Command.make("rig", cliOptions, (opts) =>
     handler({
       config: resolveConfigInput(opts.source, opts.config),
       profile: Option.getOrUndefined(opts.profile),
+      ci: opts.ci,
       init: opts.init,
       dryRun: opts.dryRun,
       apply: opts.apply,
@@ -138,30 +147,38 @@ export const makeCommand = <E, R>(handler: (options: CliOptions) => Effect.Effec
 Reads a JSON config source and installs only what's missing. Items are checked
 for existence before installing. Use --dry-run to preview local changes.
 Remote HTTPS configs and GitHub shorthand preview by default and require --apply to execute.
+Bare rig opens the interactive TUI. Headless execution requires --ci --profile <name>.
 
 Quick Start:
   rig --init                                         # Create ./system-config.json
   rig --init ./work-config.json                      # Create a starter config at a custom path
-  rig --dry-run                                      # Preview a local config
-  rig                                                # Apply ./system-config.json
-  rig https://example.com/system-config.json         # Preview a remote config
-  rig gh:user/repo                                   # Preview repo-root ${defaultGitHubConfigPath} from GitHub
-  rig gh:user/repo@<40-char-commit>                  # Preview a pinned GitHub config
+  rig                                                # Open the interactive TUI
+  rig --ci --profile macbook --dry-run               # Preview a local config
+  rig --ci --profile macbook                         # Apply ./system-config.json
+  rig --ci --profile macbook https://example.com/system-config.json
+                                                     # Preview a remote config
+  rig --ci --profile macbook gh:user/repo            # Preview repo-root ${defaultGitHubConfigPath} from GitHub
+  rig --ci --profile macbook gh:user/repo@<40-char-commit>
+                                                     # Preview a pinned GitHub config
   rig 'https://example.com/system-config.json#sha256=<digest>'
                                                             # Preview with integrity verification
-  rig --apply https://example.com/system-config.json # Apply a remote config
-  rig --apply gh:user/repo                           # Apply a GitHub shorthand config
-  rig -p work                                        # Apply with 'work' profile
-  rig -t dev -t editor                               # Install items with dev OR editor tags
-  rig --status                                       # Inspect current item status without mutating
-  rig --why neovim                                   # Explain why 'neovim' is selected
-  rig --update                                       # Update installed items
+  rig --ci --profile macbook --apply https://example.com/system-config.json
+                                                     # Apply a remote config
+  rig --ci --profile macbook --apply gh:user/repo    # Apply a GitHub shorthand config
+  rig --ci -p macbook -t dev -t editor               # Install items with dev OR editor tags
+  rig --ci -p macbook --status                       # Inspect current item status without mutating
+  rig --ci -p macbook --why neovim                   # Explain why 'neovim' is selected
+  rig --ci -p macbook --update                       # Update installed items
 
 Docs: See USAGE.md for examples and patterns`,
     ),
   );
 
-export const runCli = <E, R>(handler: (options: CliOptions) => Effect.Effect<void, E, R>) =>
+export const runCli = <E, R>(
+  handler: (options: CliOptions) => Effect.Effect<void, E, R>,
+): ((
+  args: ReadonlyArray<string>,
+) => Effect.Effect<void, E | CliValidationError.ValidationError, R | CliApp.CliApp.Environment>) =>
   Command.run(makeCommand(handler), {
     name: "rig",
     version: "0.1.0",

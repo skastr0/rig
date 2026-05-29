@@ -24,6 +24,8 @@ const makeItem = (
   },
 ): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: `which ${name}`,
   install: `brew install ${name}`,
   update: opts?.update,
@@ -47,6 +49,8 @@ const makeBrewItem = (
   },
 ): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: `which ${name}`,
   install: opts?.cask
     ? {
@@ -68,6 +72,8 @@ const makeBrewItem = (
 
 const makeDirItem = (name: string, path: string): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: path,
   onCheck: "path-exists",
   install: {
@@ -85,6 +91,8 @@ const makeSymlinkItem = (
   },
 ): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: path,
   onCheck: "path-exists",
   install: {
@@ -110,6 +118,8 @@ const makeSkillsItem = (
   },
 ): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   install: {
     source: "skills",
     package: opts?.package ?? "skills@1.5.1",

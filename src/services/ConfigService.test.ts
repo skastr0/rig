@@ -13,6 +13,14 @@ const malformedPinnedCommit = "not-a-40-char-commit";
 const sha256Digest = (content: string): string =>
   createHash("sha256").update(content).digest("hex");
 
+const configItem = (name: string, check: string, install: string) => ({
+  name,
+  profiles: ["macbook"],
+  tags: ["test"],
+  check,
+  install,
+});
+
 type MockFileSystem = FileSystem.FileSystem & {
   readonly files: Record<string, string>;
 };
@@ -37,10 +45,10 @@ const createMockFileSystem = (seedFiles: Record<string, string> = {}): MockFileS
   } as unknown as MockFileSystem;
 };
 
-const loadConfig = (source: ConfigSource, files: Record<string, string> = {}, profile?: string) =>
+const loadConfig = (source: ConfigSource, files: Record<string, string> = {}) =>
   Effect.gen(function* () {
     const configService = yield* ConfigService;
-    return yield* configService.load(source, profile);
+    return yield* configService.load(source);
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
@@ -89,15 +97,13 @@ describe("ConfigService", () => {
         { _tag: "local", path: "./system-config.json" },
         {
           "./system-config.json": JSON.stringify({
-            items: [{ name: "neovim", check: "which nvim", install: "brew install neovim" }],
+            items: [configItem("neovim", "which nvim", "brew install neovim")],
           }),
         },
       ),
     );
 
-    expect(result.items).toEqual([
-      { name: "neovim", check: "which nvim", install: "brew install neovim" },
-    ]);
+    expect(result.items).toEqual([configItem("neovim", "which nvim", "brew install neovim")]);
   });
 
   it("writes the canonical starter config to a new local file", async () => {
@@ -141,6 +147,8 @@ describe("ConfigService", () => {
     expect(result.items).toEqual([
       {
         name: "neovim",
+        profiles: ["macbook"],
+        tags: ["editor", "dev"],
         check: "which nvim",
         install: "brew install neovim",
         group: "brew",
@@ -177,7 +185,7 @@ describe("ConfigService", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          items: [{ name: "ripgrep", check: "which rg", install: "brew install ripgrep" }],
+          items: [configItem("ripgrep", "which rg", "brew install ripgrep")],
         }),
         { status: 200 },
       ),
@@ -193,14 +201,12 @@ describe("ConfigService", () => {
       "https://example.com/system-config.json",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(result.items).toEqual([
-      { name: "ripgrep", check: "which rg", install: "brew install ripgrep" },
-    ]);
+    expect(result.items).toEqual([configItem("ripgrep", "which rg", "brew install ripgrep")]);
   });
 
   it("loads pinned remote configs and verifies integrity when requested", async () => {
     const remoteConfig = JSON.stringify({
-      items: [{ name: "fd", check: "which fd", install: "brew install fd" }],
+      items: [configItem("fd", "which fd", "brew install fd")],
     });
 
     const fetchMock = vi.fn().mockResolvedValue(new Response(remoteConfig, { status: 200 }));
@@ -226,7 +232,7 @@ describe("ConfigService", () => {
       `https://raw.githubusercontent.com/guilhermecastro/rig/${pinnedCommit}/system-config.json`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(result.items).toEqual([{ name: "fd", check: "which fd", install: "brew install fd" }]);
+    expect(result.items).toEqual([configItem("fd", "which fd", "brew install fd")]);
   });
 
   it("reports remote network failures clearly", async () => {
@@ -255,7 +261,7 @@ describe("ConfigService", () => {
 
   it("fails closed when remote config integrity does not match", async () => {
     const remoteConfig = JSON.stringify({
-      items: [{ name: "ripgrep", check: "which rg", install: "brew install ripgrep" }],
+      items: [configItem("ripgrep", "which rg", "brew install ripgrep")],
     });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(remoteConfig, { status: 200 })));
@@ -380,25 +386,27 @@ describe("ConfigService", () => {
     );
   });
 
-  it("fails explicitly for unknown profiles instead of falling back to base items", async () => {
+  it("requires each item to declare at least one profile and tag", async () => {
     await expectConfigError(
       loadConfig(
         { _tag: "local", path: "./system-config.json" },
         {
           "./system-config.json": JSON.stringify({
-            items: [{ name: "git", check: "which git", install: "brew install git" }],
-            profiles: {
-              work: {
-                items: [{ name: "slack", check: "which slack", install: "brew install slack" }],
+            items: [
+              {
+                name: "git",
+                profiles: [],
+                tags: [],
+                check: "which git",
+                install: "brew install git",
               },
-            },
+            ],
           }),
         },
-        "personal",
       ),
       (error) => {
-        expect(error.message).toContain('Unknown profile "personal"');
-        expect(error.message).toContain("Available profiles: work.");
+        expect(error.message).toContain("Schema validation failed:");
+        expect(error.message).toContain("Provide at least one value");
       },
     );
   });
@@ -410,8 +418,8 @@ describe("ConfigService", () => {
         {
           "./system-config.json": JSON.stringify({
             items: [
-              { name: "git", check: "which git", install: "brew install git" },
-              { name: "git", check: "which git", install: "brew install git" },
+              configItem("git", "which git", "brew install git"),
+              configItem("git", "which git", "brew install git"),
             ],
           }),
         },
@@ -422,29 +430,6 @@ describe("ConfigService", () => {
         expect(error.message).toContain("items[0]");
         expect(error.message).toContain("items[1]");
         expect(error.message).toContain("Rename one of the items");
-      },
-    );
-  });
-
-  it("rejects profile redefinitions that forget to exclude the base item first", async () => {
-    await expectConfigError(
-      loadConfig(
-        { _tag: "local", path: "./system-config.json" },
-        {
-          "./system-config.json": JSON.stringify({
-            items: [{ name: "git", check: "which git", install: "brew install git" }],
-            profiles: {
-              work: {
-                items: [{ name: "git", check: "which git", install: "brew install git" }],
-              },
-            },
-          }),
-        },
-      ),
-      (error) => {
-        expect(error.message).toContain('Duplicate item name "git" in profile "work"');
-        expect(error.message).toContain("profiles.work.items[0]");
-        expect(error.message).toContain('add "git" to profiles.work.exclude');
       },
     );
   });

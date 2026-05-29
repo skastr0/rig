@@ -123,6 +123,8 @@ describe("config schema", () => {
     const parsed = await Effect.runPromise(
       decodeSystemItem({
         name: "agent-skills",
+        profiles: ["macbook"],
+        tags: ["ai", "skills"],
         install: {
           source: "skills",
           package: "skills@1.5.1",
@@ -136,6 +138,8 @@ describe("config schema", () => {
 
     expect(parsed).toEqual({
       name: "agent-skills",
+      profiles: ["macbook"],
+      tags: ["ai", "skills"],
       install: {
         source: "skills",
         package: "skills@1.5.1",
@@ -151,6 +155,8 @@ describe("config schema", () => {
     const parsed = await Effect.runPromise(
       decodeSystemItem({
         name: "neovim",
+        profiles: ["macbook"],
+        tags: ["editor", "dev"],
         check: "which nvim",
         install: "brew install neovim",
         timeout: 5_000,
@@ -159,6 +165,8 @@ describe("config schema", () => {
 
     expect(parsed).toEqual({
       name: "neovim",
+      profiles: ["macbook"],
+      tags: ["editor", "dev"],
       check: "which nvim",
       install: "brew install neovim",
       timeout: 5_000,
@@ -169,7 +177,7 @@ describe("config schema", () => {
     const starterConfig = await Effect.runPromise(renderStarterConfig());
 
     expect(starterConfig).toBe(
-      `{\n  "items": [\n    {\n      "name": "neovim",\n      "check": "which nvim",\n      "install": "brew install neovim",\n      "group": "brew"\n    }\n  ]\n}\n`,
+      `{\n  "items": [\n    {\n      "name": "neovim",\n      "profiles": [\n        "macbook"\n      ],\n      "tags": [\n        "editor",\n        "dev"\n      ],\n      "check": "which nvim",\n      "install": "brew install neovim",\n      "group": "brew"\n    }\n  ]\n}\n`,
     );
   });
 
@@ -208,6 +216,8 @@ describe("config schema", () => {
     const exit = await Effect.runPromiseExit(
       decodeSystemItem({
         name: "neovim",
+        profiles: ["macbook"],
+        tags: ["editor", "dev"],
         install: "brew install neovim",
       }),
     );

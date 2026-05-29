@@ -6,6 +6,8 @@ import { CycleError, ValidationError } from "../errors.js";
 
 const makeItem = (name: string, dependsOn?: string[]): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: `which ${name}`,
   install: `brew install ${name}`,
   dependsOn,

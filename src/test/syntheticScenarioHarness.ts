@@ -108,6 +108,7 @@ interface SyntheticMachineRuntimeState extends SyntheticMachineState {
 
 export interface SyntheticItemOptions {
   readonly dependsOn?: readonly string[];
+  readonly profiles?: readonly string[];
   readonly tags?: readonly string[];
   readonly group?: string;
   readonly backup?: string;
@@ -324,11 +325,12 @@ const buildItem = (
   options: SyntheticItemOptions = {},
 ): SystemItem => ({
   name: base.name,
+  profiles: [...(options.profiles ?? ["macbook"])],
+  tags: [...(options.tags ?? ["test"])],
   check: base.check,
   install: base.install,
   ...(base.onCheck ? { onCheck: base.onCheck } : {}),
   ...(options.dependsOn ? { dependsOn: [...options.dependsOn] } : {}),
-  ...(options.tags ? { tags: [...options.tags] } : {}),
   ...(options.group ? { group: options.group } : {}),
   ...(options.backup ? { backup: options.backup } : {}),
   ...(options.update ? { update: options.update } : {}),
@@ -448,6 +450,7 @@ export const snapshotSyntheticMachineState = (
 const normalizeSelectionOptions = (
   selection: SyntheticScenario["selection"],
 ): SelectionOptions => ({
+  profile: selection?.profile ?? "macbook",
   tags: [...(selection?.tags ?? [])],
   only: [...(selection?.only ?? [])],
 });

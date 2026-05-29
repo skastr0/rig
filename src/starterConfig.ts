@@ -8,6 +8,8 @@ const canonicalStarterConfig = {
   items: [
     {
       name: "neovim",
+      profiles: ["macbook"],
+      tags: ["editor", "dev"],
       check: "which nvim",
       install: "brew install neovim",
       group: "brew",

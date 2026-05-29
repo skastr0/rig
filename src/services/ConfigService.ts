@@ -9,7 +9,7 @@ import {
   type HttpsConfigSource,
 } from "../configSource.js";
 import { ConfigError } from "../errors.js";
-import { SystemConfig, SystemItem, type Profile } from "../schema/config.js";
+import { SystemConfig, SystemItem } from "../schema/config.js";
 import { renderStarterConfig, starterConfigDocsPath } from "../starterConfig.js";
 
 const remoteConfigTimeoutMs = 10_000;
@@ -30,7 +30,6 @@ export interface StarterConfigWriteResult {
 export interface ConfigService {
   readonly load: (
     source: ConfigSource,
-    profile?: string,
   ) => Effect.Effect<ResolvedConfig, ConfigError, FileSystem.FileSystem>;
   readonly writeStarterConfig: (
     path: string,
@@ -213,44 +212,23 @@ const decodeConfig = (content: string, source: ConfigSource) =>
 interface ItemReference {
   readonly name: string;
   readonly location: string;
-  readonly fromProfile: boolean;
 }
 
 const collectItemReferences = (
   items: readonly SystemItem[],
   prefix: string,
-  fromProfile: boolean,
 ): readonly ItemReference[] =>
   items.map((item, index) => ({
     name: item.name,
     location: `${prefix}[${index}]`,
-    fromProfile,
   }));
-
-const mergeProfileItems = (
-  baseItems: readonly SystemItem[],
-  profile: Profile,
-): readonly SystemItem[] => {
-  const excludeSet = new Set(profile.exclude ?? []);
-  const filteredBase = baseItems.filter((item) => !excludeSet.has(item.name));
-  const profileItems = profile.items ?? [];
-
-  return [...filteredBase, ...profileItems];
-};
 
 const formatDuplicateItemIssue = (
   name: string,
   contextLabel: string,
   references: readonly ItemReference[],
-  profileName?: string,
 ): string => {
   const locations = references.map((reference) => reference.location).join(", ");
-  const hasBaseReference = references.some((reference) => !reference.fromProfile);
-  const hasProfileReference = references.some((reference) => reference.fromProfile);
-
-  if (profileName && hasBaseReference && hasProfileReference) {
-    return `Duplicate item name "${name}" in ${contextLabel} at ${locations}. Rename one item or add "${name}" to profiles.${profileName}.exclude before redefining it.`;
-  }
 
   return `Duplicate item name "${name}" in ${contextLabel} at ${locations}. Rename one of the items so each item name is unique.`;
 };
@@ -259,7 +237,6 @@ const findDuplicateItemIssues = (
   contextLabel: string,
   references: readonly ItemReference[],
   options?: {
-    readonly profileName?: string;
     readonly skipPureBaseDuplicates?: ReadonlySet<string>;
   },
 ): { readonly issues: readonly string[]; readonly duplicateNames: ReadonlySet<string> } => {
@@ -282,15 +259,12 @@ const findDuplicateItemIssues = (
       continue;
     }
 
-    const isPureBaseDuplicate = duplicateReferences.every((reference) => !reference.fromProfile);
-    if (isPureBaseDuplicate && options?.skipPureBaseDuplicates?.has(name)) {
+    if (options?.skipPureBaseDuplicates?.has(name)) {
       continue;
     }
 
     duplicateNames.add(name);
-    issues.push(
-      formatDuplicateItemIssue(name, contextLabel, duplicateReferences, options?.profileName),
-    );
+    issues.push(formatDuplicateItemIssue(name, contextLabel, duplicateReferences));
   }
 
   return { issues, duplicateNames };
@@ -300,27 +274,9 @@ const validateConfig = (
   config: SystemConfig,
   sourceLocation: string,
 ): Effect.Effect<void, ConfigError> => {
-  const baseReferences = collectItemReferences(config.items, "items", false);
+  const baseReferences = collectItemReferences(config.items, "items");
   const baseDuplicates = findDuplicateItemIssues("base items", baseReferences);
   const issues = [...baseDuplicates.issues];
-
-  for (const [profileName, profile] of Object.entries(config.profiles ?? {})) {
-    const profileReferences = [
-      ...baseReferences.filter((reference) => !(profile.exclude ?? []).includes(reference.name)),
-      ...collectItemReferences(profile.items ?? [], `profiles.${profileName}.items`, true),
-    ];
-
-    const profileDuplicates = findDuplicateItemIssues(
-      `profile "${profileName}"`,
-      profileReferences,
-      {
-        profileName,
-        skipPureBaseDuplicates: baseDuplicates.duplicateNames,
-      },
-    );
-
-    issues.push(...profileDuplicates.issues);
-  }
 
   return issues.length === 0
     ? Effect.void
@@ -335,17 +291,15 @@ const validateConfig = (
 export const ConfigServiceLive = Layer.succeed(
   ConfigService,
   ConfigService.of({
-    load: (source, profile) =>
+    load: (source) =>
       Effect.gen(function* () {
-        const sourceLocation = configSourceLocation(source);
         const content = yield* source._tag === "https"
           ? loadRemoteConfigContent(source)
           : loadLocalConfigContent(source.path);
 
         const decodedConfig = yield* decodeConfig(content, source);
-        const items = yield* resolveProfile(decodedConfig, profile, sourceLocation);
 
-        return { items };
+        return { items: decodedConfig.items };
       }),
     writeStarterConfig: (configPath) =>
       Effect.gen(function* () {
@@ -363,42 +317,3 @@ export const ConfigServiceLive = Layer.succeed(
       }),
   }),
 );
-
-function resolveProfile(
-  config: SystemConfig,
-  profileName: string | undefined,
-  sourceLocation: string,
-): Effect.Effect<readonly SystemItem[], ConfigError> {
-  const baseItems = config.items;
-
-  if (!profileName || !config.profiles) {
-    if (!profileName) {
-      return Effect.succeed(baseItems);
-    }
-
-    return Effect.fail(
-      new ConfigError({
-        message: `Unknown profile "${profileName}". This config defines no profiles. Remove --profile or add profiles.${profileName}.`,
-        path: sourceLocation,
-      }),
-    );
-  }
-
-  const profile = config.profiles[profileName];
-  if (!profile) {
-    const availableProfiles = Object.keys(config.profiles).sort();
-    const availableProfilesMessage =
-      availableProfiles.length === 0
-        ? "This config defines no profiles."
-        : `Available profiles: ${availableProfiles.join(", ")}.`;
-
-    return Effect.fail(
-      new ConfigError({
-        message: `Unknown profile "${profileName}". ${availableProfilesMessage} Use one of the available profile names or remove --profile.`,
-        path: sourceLocation,
-      }),
-    );
-  }
-
-  return Effect.succeed(mergeProfileItems(baseItems, profile));
-}

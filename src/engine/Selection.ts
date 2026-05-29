@@ -1,29 +1,26 @@
 import type { SystemItem } from "../schema/config.js";
 
 export interface SelectionOptions {
+  readonly profile: string;
   readonly tags: readonly string[];
   readonly only: readonly string[];
 }
 
-export interface DefaultSelectionReason {
-  readonly type: "default";
-}
-
-export interface FilterSelectionReason {
-  readonly type: "filter";
-  readonly onlyMatched: boolean;
+export interface DirectSelectionReason {
+  readonly type: "direct";
+  readonly profile: string;
+  readonly matchedOnly: boolean;
   readonly matchedTags: readonly string[];
 }
 
 export interface DependencySelectionReason {
   readonly type: "dependency";
+  readonly rootProfile: string;
   readonly path: readonly string[];
+  readonly crossesProfile: boolean;
 }
 
-export type SelectionReason =
-  | DefaultSelectionReason
-  | FilterSelectionReason
-  | DependencySelectionReason;
+export type SelectionReason = DirectSelectionReason | DependencySelectionReason;
 
 export interface SelectionAnalysis {
   readonly itemMap: ReadonlyMap<string, SystemItem>;
@@ -37,14 +34,15 @@ export interface SelectionAnalysis {
 interface PendingSelection {
   readonly item: SystemItem;
   readonly path: readonly string[];
+  readonly rootProfile: string;
 }
 
 const getDirectSelectionReason = (
   item: SystemItem,
   options: SelectionOptions,
-): DefaultSelectionReason | FilterSelectionReason | undefined => {
-  if (options.only.length === 0 && options.tags.length === 0) {
-    return { type: "default" };
+): DirectSelectionReason | undefined => {
+  if (!item.profiles.includes(options.profile)) {
+    return undefined;
   }
 
   const onlyMatched = options.only.length === 0 || options.only.includes(item.name);
@@ -53,15 +51,16 @@ const getDirectSelectionReason = (
   }
 
   const matchedTags =
-    options.tags.length === 0 ? [] : (item.tags ?? []).filter((tag) => options.tags.includes(tag));
+    options.tags.length === 0 ? [] : item.tags.filter((tag) => options.tags.includes(tag));
 
   if (options.tags.length > 0 && matchedTags.length === 0) {
     return undefined;
   }
 
   return {
-    type: "filter",
-    onlyMatched: options.only.includes(item.name),
+    type: "direct",
+    profile: options.profile,
+    matchedOnly: options.only.includes(item.name),
     matchedTags,
   };
 };
@@ -86,7 +85,7 @@ const collectDirectSelections = (
 
     matchedNames.add(item.name);
     reasons.set(item.name, reason);
-    pending.push({ item, path: [item.name] });
+    pending.push({ item, path: [item.name], rootProfile: options.profile });
   }
 
   return { matchedNames, pending, reasons };
@@ -119,12 +118,29 @@ const expandDependencySelections = (
       selectedNames.add(dependencyName);
       reasons.set(dependencyName, {
         type: "dependency",
+        rootProfile: current.rootProfile,
         path: dependencyPath,
+        crossesProfile: !dependency.profiles.includes(current.rootProfile),
       });
-      pending.push({ item: dependency, path: dependencyPath });
+      pending.push({ item: dependency, path: dependencyPath, rootProfile: current.rootProfile });
     }
   }
 };
+
+export const collectAvailableProfiles = (items: readonly SystemItem[]): readonly string[] =>
+  [...new Set(items.flatMap((item) => item.profiles))].sort();
+
+export const collectAvailableTags = (
+  items: readonly SystemItem[],
+  profile?: string,
+): readonly string[] =>
+  [
+    ...new Set(
+      items
+        .filter((item) => profile === undefined || item.profiles.includes(profile))
+        .flatMap((item) => item.tags),
+    ),
+  ].sort();
 
 export const analyzeSelection = (
   items: readonly SystemItem[],

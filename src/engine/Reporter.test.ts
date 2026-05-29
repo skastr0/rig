@@ -11,6 +11,8 @@ const integrityDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456
 
 const makeItem = (name: string, dependsOn?: string[]): SystemItem => ({
   name,
+  profiles: ["macbook"],
+  tags: ["test"],
   check: `which ${name}`,
   install: `brew install ${name}`,
   dependsOn,

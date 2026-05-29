@@ -83,6 +83,8 @@ export type TimeoutInput = Schema.Schema.Type<typeof TimeoutInput>;
 
 export const SystemItem = Schema.Struct({
   name: Schema.String,
+  profiles: NonEmptyStringArray,
+  tags: NonEmptyStringArray,
   check: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   onCheck: Schema.optional(Schema.Literal("exit-code", "path-exists")),
   install: InstallStrategy,
@@ -90,7 +92,6 @@ export const SystemItem = Schema.Struct({
   group: Schema.optional(Schema.String),
   dependsOn: Schema.optional(Schema.Array(Schema.String)),
   backup: Schema.optional(Schema.String),
-  tags: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(TimeoutInput),
 }).pipe(
   Schema.filter((item) => {
@@ -110,15 +111,7 @@ export const SystemItem = Schema.Struct({
 
 export type SystemItem = Schema.Schema.Type<typeof SystemItem>;
 
-export const Profile = Schema.Struct({
-  exclude: Schema.optional(Schema.Array(Schema.String)),
-  items: Schema.optional(Schema.Array(SystemItem)),
-});
-
-export type Profile = Schema.Schema.Type<typeof Profile>;
-
 export const SystemConfig = Schema.Struct({
-  profiles: Schema.optional(Schema.Record({ key: Schema.String, value: Profile })),
   items: Schema.Array(SystemItem),
 });
 

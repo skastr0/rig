@@ -4,13 +4,23 @@ import { analyzeSelection, selectItems } from "./Selection.js";
 
 const makeItem = (
   name: string,
-  options?: Partial<Pick<SystemItem, "dependsOn" | "tags">>,
+  options?: Partial<Pick<SystemItem, "dependsOn" | "profiles" | "tags">>,
 ): SystemItem => ({
   name,
+  profiles: options?.profiles ?? ["macbook"],
+  tags: options?.tags ?? ["base"],
   check: `which ${name}`,
   install: `brew install ${name}`,
   dependsOn: options?.dependsOn,
-  tags: options?.tags,
+});
+
+const macbookSelection = (options?: {
+  readonly only?: readonly string[];
+  readonly tags?: readonly string[];
+}) => ({
+  profile: "macbook",
+  only: options?.only ?? [],
+  tags: options?.tags ?? [],
 });
 
 describe("selectItems", () => {
@@ -20,7 +30,7 @@ describe("selectItems", () => {
       makeItem("ffmpeg", { dependsOn: ["homebrew"], tags: ["media"] }),
     ];
 
-    const selected = selectItems(items, { only: ["ffmpeg"], tags: [] });
+    const selected = selectItems(items, macbookSelection({ only: ["ffmpeg"] }));
 
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "ffmpeg"]);
   });
@@ -31,7 +41,7 @@ describe("selectItems", () => {
       makeItem("ffmpeg", { dependsOn: ["homebrew"], tags: ["media"] }),
     ];
 
-    const selected = selectItems(items, { only: [], tags: ["media"] });
+    const selected = selectItems(items, macbookSelection({ tags: ["media"] }));
 
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "ffmpeg"]);
   });
@@ -43,7 +53,10 @@ describe("selectItems", () => {
       makeItem("ripgrep", { dependsOn: ["homebrew"], tags: ["dev"] }),
     ];
 
-    const selected = selectItems(items, { only: ["ffmpeg", "ripgrep"], tags: ["media"] });
+    const selected = selectItems(
+      items,
+      macbookSelection({ only: ["ffmpeg", "ripgrep"], tags: ["media"] }),
+    );
 
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "ffmpeg"]);
   });
@@ -51,7 +64,10 @@ describe("selectItems", () => {
   it("returns an empty selection when filters match nothing", () => {
     const items = [makeItem("ffmpeg", { tags: ["media"] })];
 
-    const selection = analyzeSelection(items, { only: ["ripgrep"], tags: ["dev"] });
+    const selection = analyzeSelection(
+      items,
+      macbookSelection({ only: ["ripgrep"], tags: ["dev"] }),
+    );
 
     expect(selection.selectedItems).toEqual([]);
     expect(selection.selectedNames.size).toBe(0);
@@ -66,7 +82,7 @@ describe("selectItems", () => {
       makeItem("media-workflow", { dependsOn: ["yt-dlp"], tags: ["media"] }),
     ];
 
-    const selected = selectItems(items, { only: ["media-workflow"], tags: [] });
+    const selected = selectItems(items, macbookSelection({ only: ["media-workflow"] }));
 
     expect(selected.map((item) => item.name)).toEqual(["homebrew", "yt-dlp", "media-workflow"]);
   });
@@ -74,12 +90,16 @@ describe("selectItems", () => {
   it("records direct filter matches for why introspection", () => {
     const items = [makeItem("ffmpeg", { tags: ["media", "cli"] })];
 
-    const selection = analyzeSelection(items, { only: ["ffmpeg"], tags: ["media"] });
+    const selection = analyzeSelection(
+      items,
+      macbookSelection({ only: ["ffmpeg"], tags: ["media"] }),
+    );
     const reason = selection.reasons.get("ffmpeg");
 
     expect(reason).toEqual({
-      type: "filter",
-      onlyMatched: true,
+      type: "direct",
+      profile: "macbook",
+      matchedOnly: true,
       matchedTags: ["media"],
     });
   });
@@ -91,12 +111,42 @@ describe("selectItems", () => {
       makeItem("media-workflow", { dependsOn: ["yt-dlp"], tags: ["media"] }),
     ];
 
-    const selection = analyzeSelection(items, { only: ["media-workflow"], tags: [] });
+    const selection = analyzeSelection(items, macbookSelection({ only: ["media-workflow"] }));
     const reason = selection.reasons.get("homebrew");
 
     expect(reason).toEqual({
       type: "dependency",
+      rootProfile: "macbook",
       path: ["media-workflow", "yt-dlp", "homebrew"],
+      crossesProfile: false,
+    });
+  });
+
+  it("pulls dependencies across profile boundaries after direct selection", () => {
+    const items = [
+      makeItem("tailscale", { profiles: ["macbook"] }),
+      makeItem("matrix-server", {
+        profiles: ["server-home"],
+        tags: ["matrix"],
+        dependsOn: ["tailscale"],
+      }),
+    ];
+
+    const selection = analyzeSelection(items, {
+      profile: "server-home",
+      only: [],
+      tags: ["matrix"],
+    });
+
+    expect(selection.selectedItems.map((item) => item.name)).toEqual([
+      "tailscale",
+      "matrix-server",
+    ]);
+    expect(selection.reasons.get("tailscale")).toEqual({
+      type: "dependency",
+      rootProfile: "server-home",
+      path: ["matrix-server", "tailscale"],
+      crossesProfile: true,
     });
   });
 });

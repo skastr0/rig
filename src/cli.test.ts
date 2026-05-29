@@ -25,6 +25,7 @@ describe("runCli", () => {
     const options = await parseCli(["bun", "rig"]);
 
     expect(options.config).toBe(defaultConfigSource);
+    expect(options.ci).toBe(false);
     expect(options.init).toBe(false);
     expect(options.apply).toBe(false);
   });
@@ -104,5 +105,12 @@ describe("runCli", () => {
 
     expect(options.status).toBe(false);
     expect(options.why).toBe("neovim");
+  });
+
+  it("parses --ci with the selected profile for headless execution", async () => {
+    const options = await parseCli(["bun", "rig", "--ci", "--profile", "macbook"]);
+
+    expect(options.ci).toBe(true);
+    expect(options.profile).toBe("macbook");
   });
 });
