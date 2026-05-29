@@ -1484,7 +1484,7 @@ describe("Executor", () => {
       expect(fileSystem.entries.has(normalizeTestPath(execCalls[0]?.args[0] ?? ""))).toBe(false);
     });
 
-    it("previews script installs without dumping the script body", async () => {
+    it("previews script installs with the script body visible for review", async () => {
       const fileSystem = createMockFileSystem();
       const plan = await Effect.runPromise(
         topologicalSort([
@@ -1514,15 +1514,19 @@ describe("Executor", () => {
           status: "missing",
           preview: {
             label: "structured install (script)",
-            steps: ["run zsh script (2 lines) in ~/Synthetic/service"],
+            steps: [
+              "run zsh script (2 lines) in ~/Synthetic/service",
+              "script:1: echo secret",
+              "script:2: echo ready",
+            ],
           },
         }),
       );
       expect(verboseMessages).toContain(
         "[service] would install: run zsh script (2 lines) in ~/Synthetic/service",
       );
-      expect(JSON.stringify(results)).not.toContain("secret");
-      expect(verboseMessages.join("\n")).not.toContain("secret");
+      expect(JSON.stringify(results)).toContain("secret");
+      expect(verboseMessages.join("\n")).toContain("secret");
     });
   });
 
@@ -1654,16 +1658,24 @@ describe("Executor", () => {
 
     it("should emit successful command output in verbose mode", async () => {
       const shell: ShellService = {
-        run: (command) =>
-          command.startsWith("which ")
-            ? Effect.succeed({ stdout: "/usr/bin/a", stderr: "", exitCode: 0 })
-            : command === "tool update"
-              ? Effect.succeed({
-                  stdout: "Updated active version",
-                  stderr: "warning: extra install skipped",
-                  exitCode: 0,
-                })
-              : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        run: (command, options) => {
+          if (command.startsWith("which ")) {
+            return Effect.succeed({ stdout: "/usr/bin/a", stderr: "", exitCode: 0 });
+          }
+
+          if (command === "tool update") {
+            options?.onStdout?.("Updated active version");
+            options?.onStderr?.("warning: extra install skipped");
+
+            return Effect.succeed({
+              stdout: "Updated active version",
+              stderr: "warning: extra install skipped",
+              exitCode: 0,
+            });
+          }
+
+          return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
+        },
         exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
       };
 

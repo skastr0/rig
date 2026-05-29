@@ -270,13 +270,39 @@ const findDuplicateItemIssues = (
   return { issues, duplicateNames };
 };
 
+const findDependencyProfileIssues = (items: readonly SystemItem[]): readonly string[] => {
+  const itemByName = new Map(items.map((item) => [item.name, item]));
+  const issues: string[] = [];
+
+  for (const item of items) {
+    for (const dependencyName of item.dependsOn ?? []) {
+      const dependency = itemByName.get(dependencyName);
+      if (!dependency) {
+        continue;
+      }
+
+      const missingProfiles = item.profiles.filter(
+        (profile) => !dependency.profiles.includes(profile),
+      );
+
+      if (missingProfiles.length > 0) {
+        issues.push(
+          `Item "${item.name}" depends on "${dependencyName}", but "${dependencyName}" is not available in profile(s): ${missingProfiles.join(", ")}. Add those profiles to "${dependencyName}" or remove the dependency.`,
+        );
+      }
+    }
+  }
+
+  return issues;
+};
+
 const validateConfig = (
   config: SystemConfig,
   sourceLocation: string,
 ): Effect.Effect<void, ConfigError> => {
   const baseReferences = collectItemReferences(config.items, "items");
   const baseDuplicates = findDuplicateItemIssues("base items", baseReferences);
-  const issues = [...baseDuplicates.issues];
+  const issues = [...baseDuplicates.issues, ...findDependencyProfileIssues(config.items)];
 
   return issues.length === 0
     ? Effect.void

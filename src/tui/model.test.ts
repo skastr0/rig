@@ -59,10 +59,10 @@ describe("TUI model", () => {
     ]);
   });
 
-  it("summarizes direct, dependency, and cross-profile dependency counts", () => {
+  it("summarizes direct and dependency counts for a profile", () => {
     const summary = summarizeSelection(
       [
-        makeItem("tailscale", { profiles: ["macbook"], tags: ["network"] }),
+        makeItem("tailscale", { profiles: ["macbook", "server-home"], tags: ["network"] }),
         makeItem("continuwuity", {
           profiles: ["server-home"],
           tags: ["server"],
@@ -75,10 +75,25 @@ describe("TUI model", () => {
 
     expect(summary.directCount).toBe(1);
     expect(summary.dependencyCount).toBe(1);
-    expect(summary.crossProfileDependencyCount).toBe(1);
-    expect(formatReasonBadge(summary.analysis.reasons.get("tailscale"))).toBe(
-      "dependency / cross-profile",
+    expect(formatReasonBadge(summary.analysis.reasons.get("tailscale"))).toBe("dependency");
+  });
+
+  it("applies --only as part of interactive summaries", () => {
+    const summary = summarizeSelection(
+      [
+        makeItem("homebrew", { tags: ["brew"] }),
+        makeItem("ripgrep", { tags: ["brew", "dev"], dependsOn: ["homebrew"] }),
+        makeItem("ffmpeg", { tags: ["brew", "media"], dependsOn: ["homebrew"] }),
+      ],
+      "macbook",
+      ["brew"],
+      ["ripgrep"],
     );
+
+    expect(summary.analysis.selectedItems.map((item) => item.name)).toEqual([
+      "homebrew",
+      "ripgrep",
+    ]);
   });
 
   it("keeps global logs visible while filtering item-specific logs", () => {

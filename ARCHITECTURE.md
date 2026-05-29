@@ -28,10 +28,12 @@ A declarative, idempotent macOS system configuration tool built with Effect and 
 ```typescript
 type SystemItem = {
   name: string              // Unique identifier
+  profiles: string[]        // Topology surfaces where the item is eligible
+  tags: string[]            // Technology/workflow slices for filtering
   check?: string            // Command or path to verify installation; optional for managed sources
   onCheck?: "exit-code" | "path-exists"  // Detection strategy
-  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall | SkillsInstall
-  update?: string           // Optional update command
+  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall | SkillsInstall | ScriptCommand
+  update?: string | ScriptCommand  // Optional update command
   group?: string            // Serial execution group
   dependsOn?: string[]      // Dependency ordering
   backup?: string           // Path to backup before install
@@ -49,6 +51,7 @@ type SystemItem = {
 - `{ source: "dir", path }` for directory creation
 - `{ source: "symlink", path, target }` for managed symlinks
 - `{ source: "skills", ... }` for Vercel Skills CLI installs across one or more agents
+- `{ source: "script", interpreter, script, cwd? }` for multiline scripts without fragile shell quoting
 
 **Rationale**:
 - Shell commands still cover edge cases
@@ -56,6 +59,7 @@ type SystemItem = {
 - Git clones need structured handling for sparse checkout, branch selection, and path expansion
 - Directory and symlink items encode simple filesystem intent directly instead of wrapping shell commands
 - Skills installs need reproducible `npx skills add` invocations, derived checks, telemetry suppression, and serialized writes to agent skill directories
+- Script installs keep complex service setup readable, previewable, and safer to execute than a long nested `sh -c` string
 - Keeps the schema small while making the common cases explicit
 
 ### ADR-003: Group-Based Serial Execution
@@ -72,12 +76,13 @@ type SystemItem = {
 
 **Example**:
 ```json
-{ "name": "neovim", "group": "brew", "install": "brew install neovim" }
-{ "name": "zellij", "group": "brew", "install": "brew install zellij" }
-// These run serially (same group)
-
-{ "name": "nodejs", "install": "asdf install nodejs 22" }
-// This runs in parallel with brew items (no group)
+{
+  "items": [
+    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "check": "which nvim", "group": "brew", "install": "brew install neovim" },
+    { "name": "zellij", "profiles": ["macbook"], "tags": ["brew", "terminal"], "check": "which zellij", "group": "brew", "install": "brew install zellij" },
+    { "name": "nodejs", "profiles": ["macbook"], "tags": ["runtime", "node"], "check": "which node", "install": "asdf install nodejs 22" }
+  ]
+}
 ```
 
 ### ADR-004: Detection via Check Command
@@ -112,29 +117,44 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 - Structured error handling (TaggedError)
 - Reference implementation available (tasks-tui)
 
-### ADR-006: Profile-Based Configuration
+### ADR-006: Profile and Tag Selection
 
-**Context**: Different machines (work/personal) need different configurations.
+**Context**: Different machines and environments need different topology surfaces, while operators also need technology slices such as `brew`, `runtime`, `server`, or `editor` that can cut across those surfaces.
 
-**Decision**: Config supports `profiles` with `exclude` and additional `items`.
+**Decision**: Each item declares both:
+- `profiles`: the surfaces where the item is eligible, such as `macbook`, `work`, `personal`, or `server-home`
+- `tags`: the technology/workflow slices the item belongs to, such as `brew`, `node`, `matrix`, or `containers`
+
+Bare `rig` is interactive when attached to a TTY: the TUI asks for a profile, optional tag filters, and execution options. Headless usage fails closed and requires `--ci --profile <name>`.
 
 **Structure**:
 ```json
 {
-  "profiles": {
-    "work": {
-      "exclude": ["personal-repos"],
-      "items": [{ "name": "slack", ... }]
+  "items": [
+    {
+      "name": "homebrew",
+      "profiles": ["macbook", "work"],
+      "tags": ["brew", "essential"],
+      "check": "which brew",
+      "install": "..."
+    },
+    {
+      "name": "continuwuity-matrix-homeserver",
+      "profiles": ["server-home"],
+      "tags": ["server", "matrix", "docker"],
+      "check": "...",
+      "install": { "source": "script", "interpreter": "/bin/zsh", "script": "..." }
     }
-  },
-  "items": [...]  // Base items
+  ]
 }
 ```
 
 **Resolution**:
-1. Start with base `items`
-2. Remove items matching profile's `exclude`
-3. Add profile's `items`
+1. Load and validate all declared items
+2. Collect available profiles and tags from item metadata
+3. Select direct items matching the requested profile and tag filters
+4. Expand dependencies by item name, requiring every dependency to be available on the active profile
+5. Preserve dependency metadata so the UI and dry-run output can distinguish direct matches and dependency matches
 
 ### ADR-007: Backup Before Overwrite
 
@@ -155,7 +175,7 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLI Layer                            │
-│  @effect/cli: --config, --profile, --dry-run, --only       │
+│  @effect/cli + OpenTUI: --config, --profile, --tags, --ci  │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -175,7 +195,7 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 │  │ (Bun.spawn)  │ │ (clone)      │ │ (copy)       │       │
 │  └──────────────┘ └──────────────┘ └──────────────┘       │
 │  ┌──────────────┐                                          │
-│  │ConfigService │ (load, validate, resolve profiles)       │
+│  │ConfigService │ (load, validate, resolve selection)      │
 │  └──────────────┘                                          │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -189,10 +209,10 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 ## Data Flow
 
 ```
-1. CLI parses args
+1. CLI parses args or launches the interactive TUI
    │
    ▼
-2. ConfigService loads JSON, validates with Schema, resolves profile
+2. ConfigService loads JSON, validates with Schema, resolves profile/tag selection
    │
    ▼
 3. Planner builds dependency graph, topological sort
@@ -213,13 +233,14 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 rig/
 ├── src/
 │   ├── index.ts              # CLI entry (@effect/cli)
+│   ├── appHandler.ts         # Headless validation or interactive TUI dispatch
 │   ├── runtime.ts            # ManagedRuntime (single instance)
 │   ├── errors.ts             # Tagged errors
+│   ├── tui/                  # React/OpenTUI profile, tag, review, and run flow
 │   ├── schema/
 │   │   ├── config.ts         # Effect Schema definitions
-│   │   └── validation.ts     # Config validation (cycles, refs)
 │   ├── services/
-│   │   ├── ConfigService.ts  # Load, validate, resolve profiles
+│   │   ├── ConfigService.ts  # Load and validate config files
 │   │   ├── ShellService.ts   # Command execution with timeout
 │   │   ├── BackupService.ts  # Backup before overwrite
 │   │   ├── GitService.ts     # Git clone operations
@@ -230,7 +251,6 @@ rig/
 │       └── Reporter.ts       # Progress output, dry-run display
 ├── package.json
 ├── tsconfig.json
-├── schema.json               # JSON Schema for editor autocomplete
 └── example-config.json
 ```
 

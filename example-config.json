@@ -1,73 +1,62 @@
 {
-  "profiles": {
-    "work": {
-      "exclude": ["gaming", "personal-repos"],
-      "items": [
-        {
-          "name": "slack",
-          "check": "/Applications/Slack.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask slack",
-          "group": "brew",
-          "tags": ["communication"]
-        }
-      ]
-    },
-    "personal": {
-      "exclude": ["work-tools"],
-      "items": []
-    }
-  },
   "items": [
     {
       "name": "homebrew",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "essential"],
       "check": "which brew",
-      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
-      "tags": ["essential"]
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     },
     {
       "name": "neovim",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "editor", "dev", "essential"],
       "check": "which nvim",
-      "install": "brew install neovim",
+      "install": { "source": "brew", "formula": "neovim" },
       "update": "brew upgrade neovim",
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["editor", "dev", "essential"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "ripgrep",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "dev", "essential"],
       "check": "which rg",
-      "install": "brew install ripgrep",
+      "install": { "source": "brew", "formula": "ripgrep" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["dev", "essential"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "fd",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "dev"],
       "check": "which fd",
-      "install": "brew install fd",
+      "install": { "source": "brew", "formula": "fd" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["dev"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "fzf",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "dev"],
       "check": "which fzf",
-      "install": "brew install fzf",
+      "install": { "source": "brew", "formula": "fzf" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["dev"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "zoxide",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "shell", "dev"],
       "check": "which zoxide",
-      "install": "brew install zoxide",
+      "install": { "source": "brew", "formula": "zoxide" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["dev"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "nvim-config",
+      "profiles": ["work", "personal"],
+      "tags": ["editor", "config"],
       "check": "~/.config/nvim/init.lua",
       "onCheck": "path-exists",
       "install": {
@@ -76,69 +65,76 @@
         "path": "~/.config/nvim"
       },
       "dependsOn": ["neovim"],
-      "backup": "~/.config/nvim",
-      "tags": ["editor", "config"]
+      "backup": "~/.config/nvim"
     },
     {
-      "name": "asdf",
-      "check": "which asdf",
-      "install": "brew install asdf",
+      "name": "mise",
+      "profiles": ["work", "personal"],
+      "tags": ["brew", "runtime", "dev"],
+      "check": "which mise",
+      "install": { "source": "brew", "formula": "mise" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["dev"]
-    },
-    {
-      "name": "nodejs-plugin",
-      "check": "asdf plugin list | grep -q nodejs",
-      "install": "asdf plugin add nodejs",
-      "dependsOn": ["asdf"],
-      "tags": ["dev", "node"]
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "nodejs",
-      "check": "node --version | grep -q 22",
-      "install": "asdf install nodejs 22 && asdf global nodejs 22",
-      "dependsOn": ["nodejs-plugin"],
-      "tags": ["dev", "node"]
+      "profiles": ["work", "personal"],
+      "tags": ["runtime", "node", "dev"],
+      "check": "node --version | grep -q 24",
+      "install": "mise use -g node@lts",
+      "dependsOn": ["mise"]
     },
     {
       "name": "pnpm",
+      "profiles": ["work", "personal"],
+      "tags": ["runtime", "node", "dev"],
       "check": "which pnpm",
-      "install": "npm install -g pnpm",
-      "dependsOn": ["nodejs"],
-      "tags": ["dev", "node"]
+      "install": "mise use -g npm:pnpm@latest",
+      "dependsOn": ["nodejs"]
     },
     {
       "name": "docker",
-      "check": "docker info > /dev/null 2>&1",
-      "install": "brew install --cask docker",
+      "profiles": ["work"],
+      "tags": ["brew", "containers", "devops"],
+      "check": "docker info >/dev/null 2>&1",
+      "install": { "source": "brew", "cask": "docker" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["devops"]
+      "dependsOn": ["homebrew"]
     },
     {
-      "name": "personal-repos",
-      "check": "~/Projects/personal",
+      "name": "slack",
+      "profiles": ["work"],
+      "tags": ["brew", "communication", "work"],
+      "check": "/Applications/Slack.app",
       "onCheck": "path-exists",
-      "install": "mkdir -p ~/Projects/personal",
-      "tags": ["personal"]
+      "install": { "source": "brew", "cask": "slack" },
+      "group": "brew",
+      "dependsOn": ["homebrew"]
     },
     {
       "name": "work-tools",
+      "profiles": ["work"],
+      "tags": ["brew", "work"],
       "check": "which work-cli",
-      "install": "brew install work-cli",
+      "install": { "source": "brew", "formula": "work-cli" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["work"]
+      "dependsOn": ["homebrew"]
     },
     {
-      "name": "gaming",
+      "name": "personal-repos",
+      "profiles": ["personal"],
+      "tags": ["filesystem", "personal"],
+      "install": { "source": "dir", "path": "~/Projects/personal" }
+    },
+    {
+      "name": "steam",
+      "profiles": ["personal"],
+      "tags": ["brew", "gaming", "personal"],
       "check": "/Applications/Steam.app",
       "onCheck": "path-exists",
-      "install": "brew install --cask steam",
+      "install": { "source": "brew", "cask": "steam" },
       "group": "brew",
-      "dependsOn": ["homebrew"],
-      "tags": ["gaming", "personal"]
+      "dependsOn": ["homebrew"]
     }
   ]
 }

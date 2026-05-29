@@ -8,6 +8,7 @@ export class ConfigError extends Data.TaggedError("ConfigError")<{
 export class ShellError extends Data.TaggedError("ShellError")<{
   readonly command: string;
   readonly exitCode: number;
+  readonly stdout?: string;
   readonly stderr: string;
   readonly timedOut?: boolean;
   readonly timeoutMs?: number;
@@ -18,6 +19,7 @@ export class GitError extends Data.TaggedError("GitError")<{
   readonly reason: string;
   readonly command?: string;
   readonly exitCode?: number;
+  readonly stdout?: string;
   readonly stderr?: string;
   readonly timedOut?: boolean;
   readonly timeoutMs?: number;
@@ -28,6 +30,7 @@ export class BrewError extends Data.TaggedError("BrewError")<{
   readonly reason: string;
   readonly command?: string;
   readonly exitCode?: number;
+  readonly stdout?: string;
   readonly stderr?: string;
   readonly timedOut?: boolean;
   readonly timeoutMs?: number;

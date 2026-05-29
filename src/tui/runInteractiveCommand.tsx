@@ -1,7 +1,7 @@
 import { createCliRenderer, type SelectOption } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { Effect } from "effect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatError } from "../errorFormatting.js";
 import { ConfigError } from "../errors.js";
 import { AppRuntime } from "../runtime.js";
@@ -12,6 +12,7 @@ import {
   buildTagRows,
   filterLogsByItem,
   formatReasonBadge,
+  getItemPreviewLines,
   summarizeSelection,
   type TuiLogLine,
   type TuiStage,
@@ -24,6 +25,7 @@ import {
   type InteractiveCommandInput,
   type PendingLogLine,
 } from "./runner.js";
+import { getRunDisabledReason } from "./safety.js";
 import { useRigKeyboard } from "./useRigKeyboard.js";
 
 interface InteractiveRigAppProps {
@@ -84,6 +86,10 @@ function InteractiveRigApp({
   const [update, setUpdate] = useState(options.update);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<readonly TuiLogLine[]>([]);
+  const runningRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | undefined>(undefined);
+  const runDisabledReason = getRunDisabledReason(configSource, options);
+  const canRun = runDisabledReason === undefined;
 
   useEffect(() => {
     setSelectedTags((previous) => {
@@ -105,8 +111,8 @@ function InteractiveRigApp({
     [items, selectedProfile, selectedTags],
   );
   const selectionSummary = useMemo(
-    () => summarizeSelection(items, selectedProfile, selectedTagNames),
-    [items, selectedProfile, selectedTagNames],
+    () => summarizeSelection(items, selectedProfile, selectedTagNames, options.only),
+    [items, options.only, selectedProfile, selectedTagNames],
   );
   const selectedItems = selectionSummary.analysis.selectedItems;
   const itemOptions = useMemo<SelectOption[]>(
@@ -153,6 +159,10 @@ function InteractiveRigApp({
   const selectedItemReason = selectedItemName
     ? selectionSummary.analysis.reasons.get(selectedItemName)
     : undefined;
+  const selectedItem = selectedItemName
+    ? selectionSummary.analysis.itemMap.get(selectedItemName)
+    : undefined;
+  const itemPreviewLines = getItemPreviewLines(selectedItem, update);
   const visibleLogs = filterLogsByItem(logs, selectedItemName);
 
   const appendLog = useCallback((line: PendingLogLine) => {
@@ -221,59 +231,98 @@ function InteractiveRigApp({
     });
   }, [running, selectedIndex, stage, tagRows]);
 
+  const finishRun = useCallback(() => {
+    runningRef.current = false;
+    abortControllerRef.current = undefined;
+    setRunning(false);
+    setStage("done");
+  }, []);
+
   const runSelection = useCallback(
-    async (dryRun: boolean): Promise<void> => {
+    async (dryRun: boolean, signal: AbortSignal): Promise<void> => {
       try {
         const summary = await executeRun(
           {
             profile: selectedProfile,
             tags: selectedTagNames,
+            only: options.only,
             dryRun,
             update,
             verbose,
-            apply: !dryRun,
+            apply: options.apply && !dryRun,
           },
           appendLog,
+          signal,
         );
         appendLog({ kind: "system", message: formatPlanLine(summary.results) });
       } catch (error: unknown) {
-        appendLog({ kind: "error", message: formatError(error) });
+        appendLog({
+          kind: signal.aborted ? "system" : "error",
+          message: signal.aborted ? "Run cancelled" : formatError(error),
+        });
       } finally {
-        setRunning(false);
-        setStage("done");
+        finishRun();
       }
     },
-    [appendLog, executeRun, selectedProfile, selectedTagNames, update, verbose],
+    [
+      appendLog,
+      executeRun,
+      finishRun,
+      options.apply,
+      options.only,
+      selectedProfile,
+      selectedTagNames,
+      update,
+      verbose,
+    ],
   );
 
   const startRun = useCallback(
     (dryRun: boolean) => {
-      if (running || selectedItems.length === 0) {
+      if (runningRef.current || selectedItems.length === 0) {
         if (selectedItems.length === 0) {
           appendLog({ kind: "error", message: "No items selected for this profile/tag set" });
         }
         return;
       }
 
+      if (!dryRun && !canRun) {
+        appendLog({ kind: "error", message: `Run disabled: ${runDisabledReason}` });
+        return;
+      }
+
       setLogs([]);
       setStage("running");
       setSelectedIndex(0);
+      runningRef.current = true;
       setRunning(true);
 
-      const runPromise = runSelection(dryRun);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const runPromise = runSelection(dryRun, controller.signal);
       runPromise.catch((error: unknown) => {
         appendLog({ kind: "error", message: formatError(error) });
-        setRunning(false);
-        setStage("done");
+        finishRun();
       });
     },
-    [appendLog, runSelection, running, selectedItems.length],
+    [appendLog, canRun, finishRun, runDisabledReason, runSelection, selectedItems.length],
   );
+
+  const cancelRun = useCallback(() => {
+    if (!runningRef.current) {
+      return;
+    }
+
+    appendLog({ kind: "system", message: "Cancellation requested" });
+    abortControllerRef.current?.abort();
+  }, [appendLog]);
 
   useRigKeyboard(
     { running, stage },
     {
       exit: onExit,
+      cancel: cancelRun,
       back: goBack,
       toggleTag,
       toggleVerbose: () => setVerbose((current) => !current),
@@ -320,20 +369,29 @@ function InteractiveRigApp({
           stage={stage}
           profile={selectedProfile}
           tags={selectedTagNames}
+          only={options.only}
           selectedCount={selectedItems.length}
           directCount={selectionSummary.directCount}
           dependencyCount={selectionSummary.dependencyCount}
-          crossProfileDependencyCount={selectionSummary.crossProfileDependencyCount}
           running={running}
           update={update}
           verbose={verbose}
+          canRun={canRun}
+          runDisabledReason={runDisabledReason}
           selectedItemName={selectedItemName}
           selectedItemReason={selectedItemReason}
+          itemPreviewLines={itemPreviewLines}
           logs={visibleLogs}
         />
       </box>
 
-      <Footer running={running} verbose={verbose} update={update} />
+      <Footer
+        running={running}
+        verbose={verbose}
+        update={update}
+        canRun={canRun}
+        runDisabledReason={runDisabledReason}
+      />
     </box>
   );
 }
@@ -363,8 +421,10 @@ export const runInteractiveCommand = (
             options={input.options}
             configSource={input.configSource}
             items={input.items}
-            executeRun={(request, emit) =>
-              AppRuntime.runPromise(executeInteractivePlan(input, request, emit))
+            executeRun={(request, emit, signal) =>
+              AppRuntime.runPromise(executeInteractivePlan(input, request, emit), {
+                signal,
+              })
             }
             onExit={close}
           />,

@@ -19,15 +19,18 @@ interface DetailsPaneProps {
   readonly stage: TuiStage;
   readonly profile: string;
   readonly tags: readonly string[];
+  readonly only: readonly string[];
   readonly selectedCount: number;
   readonly directCount: number;
   readonly dependencyCount: number;
-  readonly crossProfileDependencyCount: number;
   readonly running: boolean;
   readonly update: boolean;
   readonly verbose: boolean;
+  readonly canRun: boolean;
+  readonly runDisabledReason: string | undefined;
   readonly selectedItemName: string | undefined;
   readonly selectedItemReason: Parameters<typeof formatReasonBadge>[0];
+  readonly itemPreviewLines: readonly string[];
   readonly logs: readonly TuiLogLine[];
 }
 
@@ -35,10 +38,13 @@ interface FooterProps {
   readonly running: boolean;
   readonly verbose: boolean;
   readonly update: boolean;
+  readonly canRun: boolean;
+  readonly runDisabledReason: string | undefined;
 }
 
 interface LogStreamProps {
   readonly stage: TuiStage;
+  readonly previewLines: readonly string[];
   readonly logs: readonly TuiLogLine[];
 }
 
@@ -48,6 +54,10 @@ const logColorFor = (kind: TuiLogLine["kind"]): string => {
       return palette.cyan;
     case "progress":
       return palette.text;
+    case "preview":
+      return palette.amber;
+    case "output":
+      return palette.text;
     case "verbose":
       return palette.muted;
     case "error":
@@ -55,7 +65,9 @@ const logColorFor = (kind: TuiLogLine["kind"]): string => {
   }
 };
 
-function LogStream({ stage, logs }: LogStreamProps) {
+function LogStream({ stage, previewLines, logs }: LogStreamProps) {
+  const showReviewPreview = stage === "review" && logs.length === 0 && previewLines.length > 0;
+
   return (
     <scrollbox
       focused={stage === "running" || stage === "done"}
@@ -69,10 +81,16 @@ function LogStream({ stage, logs }: LogStreamProps) {
         padding: 1,
       }}
     >
-      {logs.length === 0 ? (
+      {showReviewPreview ? (
+        previewLines.map((line, index) => (
+          <text key={index} fg={index === 0 ? palette.amber : palette.text} wrapMode="word">
+            {line}
+          </text>
+        ))
+      ) : logs.length === 0 ? (
         <text fg={palette.muted} wrapMode="word">
           {stage === "review"
-            ? "Press p to preview or r to run. Logs will stream here."
+            ? "Select an item to inspect install/update commands. Press p to preview."
             : "No logs yet."}
         </text>
       ) : (
@@ -142,15 +160,18 @@ export function DetailsPane({
   stage,
   profile,
   tags,
+  only,
   selectedCount,
   directCount,
   dependencyCount,
-  crossProfileDependencyCount,
   running,
   update,
   verbose,
+  canRun,
+  runDisabledReason,
   selectedItemName,
   selectedItemReason,
+  itemPreviewLines,
   logs,
 }: DetailsPaneProps) {
   const itemLabel = selectedItemName
@@ -171,26 +192,31 @@ export function DetailsPane({
         gap: 1,
       }}
     >
-      <box style={{ flexDirection: "column", height: 8 }}>
+      <box style={{ flexDirection: "column", height: 10 }}>
         <text fg={palette.cyan}>profile: {profile || "none"}</text>
         <text fg={palette.text}>tags: {tags.length > 0 ? tags.join(", ") : "all"}</text>
+        <text fg={palette.text}>only: {only.length > 0 ? only.join(", ") : "all"}</text>
         <text fg={palette.text}>
           selected: {selectedCount} total / {directCount} direct / {dependencyCount} dependencies
         </text>
-        <text fg={palette.violet}>cross-profile dependencies: {crossProfileDependencyCount}</text>
         <text fg={running ? palette.amber : palette.muted}>
           mode: {running ? "executing" : update ? "update" : "install"} / verbose{" "}
           {verbose ? "on" : "off"}
         </text>
+        <text fg={canRun ? palette.muted : palette.crimson}>
+          run: {canRun ? "enabled" : (runDisabledReason ?? "disabled")}
+        </text>
         <text fg={palette.muted}>item: {itemLabel}</text>
       </box>
 
-      <LogStream stage={stage} logs={logs} />
+      <LogStream stage={stage} previewLines={itemPreviewLines} logs={logs} />
     </box>
   );
 }
 
-export function Footer({ running, verbose, update }: FooterProps) {
+export function Footer({ running, verbose, update, canRun, runDisabledReason }: FooterProps) {
+  const runHint = canRun ? "r run" : `r disabled (${runDisabledReason ?? "preview-only"})`;
+
   return (
     <box
       style={{
@@ -203,9 +229,9 @@ export function Footer({ running, verbose, update }: FooterProps) {
       }}
     >
       <text fg={palette.amber} wrapMode="word">
-        {`enter next/select | space tag | p preview | r run | b back | q quit
+        {`enter next/select | space tag | p preview | ${runHint} | b back | q quit
 v verbose [${verbose ? "x" : " "}] | u update [${update ? "x" : " "}] | ${
-          running ? "logs filter by item" : "profile -> tags -> preview/run"
+          running ? "q/ctrl-c cancel run" : "profile -> tags -> preview/run"
         }`}
       </text>
     </box>

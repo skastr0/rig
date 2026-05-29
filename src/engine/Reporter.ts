@@ -7,6 +7,7 @@ import {
 import type { ExecutionMode } from "../executionMode.js";
 import type { PlanResult } from "./Planner.js";
 import type { ExecutionPreview, ExecutionResult, InspectionResult } from "./Executor.js";
+import { installInspection } from "./InstallInspection.js";
 
 const colors = {
   reset: "\x1b[0m",
@@ -176,6 +177,7 @@ const printStatusSummary = (
 export interface Reporter {
   readonly printConfigSource: (source: ConfigSource, executionMode?: ExecutionMode) => void;
   readonly printPlan: (plan: PlanResult, dryRun?: boolean) => void;
+  readonly printStaticPreview: (plan: PlanResult, includeUpdate?: boolean) => void;
   readonly printProgress: (result: ExecutionResult) => void;
   readonly printSummary: (results: readonly ExecutionResult[]) => void;
   readonly printStatus: (results: readonly InspectionResult[]) => void;
@@ -260,6 +262,49 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     });
 
     console.log(`\n  ${c.dim}Total: ${plan.sorted.length} items${c.reset}\n`);
+  };
+
+  const getUpdatePreviews = (item: PlanResult["sorted"][number]): readonly ExecutionPreview[] => [
+    ...(item.update ? [installInspection.getUpdatePreview(item.update)] : []),
+    ...(installInspection.isSymlinkInstall(item.install)
+      ? [installInspection.getManagedUpdatePreview(item.install)]
+      : []),
+  ];
+
+  const printStaticPreview = (plan: PlanResult, includeUpdate = false) => {
+    console.log(`\n${c.bold}Remote Static Preview - Execution Plan:${c.reset}\n`);
+
+    plan.levels.forEach((level, index) => {
+      const levelLabel = `${c.dim}Level ${index + 1}${c.reset}`;
+      const items = level.map((item) => item.name).join(", ");
+      console.log(`  ${levelLabel}: ${items}`);
+    });
+
+    console.log(`\n  ${c.dim}Total: ${plan.sorted.length} items${c.reset}`);
+    console.log(
+      `  ${c.dim}Checks are not executed for remote preview. Use --apply to inspect local state and execute after review.${c.reset}\n`,
+    );
+
+    for (const item of plan.sorted) {
+      console.log(
+        `  ${c.yellow}${symbols.dot}${c.reset} ${item.name} ${c.dim}${symbols.arrow}${c.reset} remote preview`,
+      );
+      printPreview(
+        {
+          label: "check command not executed",
+          steps: [item.check ?? "no check"],
+        },
+        c,
+        console.log,
+      );
+      printPreview(installInspection.getInstallPreview(item.install), c, console.log);
+
+      if (includeUpdate) {
+        for (const updatePreview of getUpdatePreviews(item)) {
+          printPreview(updatePreview, c, console.log);
+        }
+      }
+    }
   };
 
   const printProgress = (result: ExecutionResult) => {
@@ -375,6 +420,7 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   return {
     printConfigSource,
     printPlan,
+    printStaticPreview,
     printProgress,
     printSummary,
     printStatus,

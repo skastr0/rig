@@ -33,6 +33,12 @@ export interface ExecutionResult {
   readonly error?: string;
 }
 
+interface CommandOutputEvent {
+  readonly itemName: string;
+  readonly stream: "stdout" | "stderr";
+  readonly line: string;
+}
+
 export type InspectionStatus = "installed" | "missing" | "updateable" | "blocked" | "error";
 
 export interface InspectionResult {
@@ -52,6 +58,7 @@ export interface ExecutorOptions {
   readonly update?: boolean;
   readonly verbose?: boolean;
   readonly onProgress?: (result: ExecutionResult) => void;
+  readonly onOutput?: (output: CommandOutputEvent) => void;
   readonly onVerbose?: (message: string) => void;
 }
 

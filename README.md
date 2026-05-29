@@ -2,7 +2,7 @@
 
 A declarative, idempotent macOS/Linux system configuration tool built with Effect and Bun.
 
-Define your system configuration in JSON, and `rig` will install only what's missing.
+Define your system configuration in JSON, and `rig` will install only what's missing. Bare `rig` opens an interactive terminal UI; headless automation uses `--ci --profile <name>`.
 
 ## Quick Start
 
@@ -16,6 +16,8 @@ cat > system-config.json << 'EOF'
   "items": [
     {
       "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["editor", "dev"],
       "check": "which nvim",
       "install": {
         "source": "brew",
@@ -26,29 +28,30 @@ cat > system-config.json << 'EOF'
 }
 EOF
 
-# Preview what would be installed
-rig --dry-run
-
-# Apply local configuration
+# Open the interactive TUI
 rig
 
+# Preview or apply headlessly
+rig --ci --profile macbook --dry-run
+rig --ci --profile macbook
+
 # Review a remote configuration first (default for HTTPS sources)
-rig https://example.com/system-config.json
+rig --ci --profile macbook https://example.com/system-config.json
 
 # Review a GitHub-hosted configuration first
-rig gh:user/repo
+rig --ci --profile macbook gh:user/repo
 
 # Review a pinned GitHub configuration
-rig gh:user/repo@0123456789abcdef0123456789abcdef01234567
+rig --ci --profile macbook gh:user/repo@0123456789abcdef0123456789abcdef01234567
 
 # Review a remote config with recorded integrity
-rig 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+rig --ci --profile macbook 'https://example.com/system-config.json#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
 # Apply a reviewed remote configuration
-rig --apply https://example.com/system-config.json
+rig --ci --profile macbook --apply https://example.com/system-config.json
 
 # Apply a reviewed GitHub shorthand configuration
-rig --apply gh:user/repo
+rig --ci --profile macbook --apply gh:user/repo
 ```
 
 ## Installation
@@ -71,10 +74,11 @@ bun run install:local
 To produce binaries for all four supported platforms (`darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`) under `dist/`:
 
 ```bash
+bun install --cpu='*' --os='*'
 bun run build
 ```
 
-Use this when you want to upload binaries to a release or copy them to another machine. For installing on the current machine, prefer `bun run install:local`.
+Use this when you want to upload binaries to a release or copy them to another machine. The extra install command pulls OpenTUI's optional native packages for every target. For installing on the current machine, prefer `bun run install:local`.
 
 ## Configuration
 
@@ -133,22 +137,27 @@ Integrity mismatches fail closed and report both the expected and observed SHA-2
 Local configs keep the existing contract: apply by default, preview with `--dry-run`.
 
 Remote configs are review-first:
-- `rig https://example.com/system-config.json` loads the remote config in a non-mutating preview mode
+- `rig https://example.com/system-config.json` opens the interactive TUI in review mode
 - `rig gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
+- headless remote runs require `--ci --profile <name>` and preview by default
 - preview output shows the source, the selected items, and the install or update steps that would run
 - preview output also echoes any active GitHub commit pin or SHA-256 integrity check
-- preview output makes shell install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, `symlink`, and `skills`
-- `rig --apply https://example.com/system-config.json` is the explicit opt-in to execute a remote config
+- preview output makes shell and script install commands explicit and distinguishes them from structured installs like `brew`, `git`, `dir`, `symlink`, and `skills`
+- `rig --apply https://example.com/system-config.json` is the explicit opt-in that enables the TUI run action for a remote config
+- `rig --ci --profile macbook --apply https://example.com/system-config.json` is the headless opt-in
 - `rig --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
 
 ```bash
-# Review first
+# Review first in the TUI
 rig https://example.com/system-config.json
 rig gh:owner/repo
 
-# Then apply once you trust it
+# Headless remote preview
+rig --ci --profile macbook https://example.com/system-config.json
+
+# Then apply once you trust it; without --apply the TUI run key stays disabled
 rig --apply https://example.com/system-config.json
-rig --apply gh:owner/repo/path/to/config.json
+rig --ci --profile macbook --apply gh:owner/repo/path/to/config.json
 ```
 
 ### Basic Structure
@@ -158,6 +167,8 @@ rig --apply gh:owner/repo/path/to/config.json
   "items": [
     {
       "name": "config-root",
+      "profiles": ["macbook"],
+      "tags": ["base", "filesystem"],
       "check": "~/.config",
       "onCheck": "path-exists",
       "install": {
@@ -174,6 +185,8 @@ rig --apply gh:owner/repo/path/to/config.json
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier for the item |
+| `profiles` | Yes | Topology surfaces where this item belongs, such as `"macbook"` or `"server-home"` |
+| `tags` | Yes | Technology or workflow slices used for filtering, such as `"brew"`, `"editor"`, or `"server"` |
 | `check` | Usually | Command or path to verify installation; optional for managed `dir`, `symlink`, and `skills` sources |
 | `install` | Yes | Shell command or structured install source |
 | `onCheck` | No | Detection strategy: `"exit-code"` (default) or `"path-exists"` |
@@ -182,7 +195,6 @@ rig --apply gh:owner/repo/path/to/config.json
 | `dependsOn` | No | Array of item names that must be installed first |
 | `timeout` | No | Per-item timeout in milliseconds for checks, installs, and updates |
 | `backup` | No | Path to backup before installing |
-| `tags` | No | Array of tags for filtering |
 
 ### Check Strategies
 
@@ -202,6 +214,8 @@ rig --apply gh:owner/repo/path/to/config.json
 ```json
 {
   "name": "projects-root",
+  "profiles": ["macbook"],
+  "tags": ["filesystem", "base"],
   "check": "~/Projects",
   "onCheck": "path-exists",
   "install": {
@@ -215,6 +229,8 @@ rig --apply gh:owner/repo/path/to/config.json
 ```json
 {
   "name": "zshrc",
+  "profiles": ["macbook"],
+  "tags": ["dotfiles", "shell"],
   "check": "~/.zshrc",
   "onCheck": "path-exists",
   "install": {
@@ -231,6 +247,10 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 **Brew source (preferred for Homebrew)**:
 ```json
 {
+  "name": "neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
+  "check": "which nvim",
   "install": {
     "source": "brew",
     "formula": "neovim"
@@ -240,6 +260,11 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 
 ```json
 {
+  "name": "firefox",
+  "profiles": ["macbook"],
+  "tags": ["brew", "browser"],
+  "check": "/Applications/Firefox.app",
+  "onCheck": "path-exists",
   "install": {
     "source": "brew",
     "cask": "firefox"
@@ -250,6 +275,11 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 **Git clone**:
 ```json
 {
+  "name": "dotfiles",
+  "profiles": ["macbook"],
+  "tags": ["dotfiles", "git"],
+  "check": "~/.dotfiles",
+  "onCheck": "path-exists",
   "install": {
     "source": "git",
     "repo": "https://github.com/user/dotfiles.git",
@@ -264,6 +294,8 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 ```json
 {
   "name": "agent-skills",
+  "profiles": ["macbook"],
+  "tags": ["ai", "skills"],
   "install": {
     "source": "skills",
     "package": "skills@1.5.1",
@@ -273,8 +305,7 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
     "agents": ["codex", "opencode"],
     "mode": "copy"
   },
-  "dependsOn": ["nodejs"],
-  "tags": ["ai", "skills"]
+  "dependsOn": ["nodejs"]
 }
 ```
 
@@ -282,8 +313,32 @@ For `skills` items, `check` can be omitted. `rig` derives global skill paths for
 
 **Shell command (escape hatch)**:
 ```json
-{ "install": "brew install neovim" }
+{
+  "name": "neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
+  "check": "which nvim",
+  "install": "brew install neovim"
+}
 ```
+
+**Script command (preferred for multi-line service installers)**:
+```json
+{
+  "name": "continuwuity-matrix-homeserver",
+  "profiles": ["server-home"],
+  "tags": ["server", "matrix", "docker"],
+  "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\"",
+  "install": {
+    "source": "script",
+    "interpreter": "zsh",
+    "cwd": "~/.matrix/continuwuity",
+    "script": "set -euo pipefail\nmkdir -p data\ndocker compose up -d"
+  }
+}
+```
+
+Script commands are written to a temporary file and executed as `interpreter <tempfile>`, so complex Docker or service setup does not need fragile nested shell quoting.
 
 ### Groups (Serial Execution)
 
@@ -292,9 +347,9 @@ Items with the same `group` run sequentially. Use this for package managers that
 ```json
 {
   "items": [
-    { "name": "neovim", "group": "brew", "check": "which nvim", "install": "brew install neovim" },
-    { "name": "ripgrep", "group": "brew", "check": "which rg", "install": "brew install ripgrep" },
-    { "name": "nodejs", "check": "which node", "install": "asdf install nodejs 22" }
+    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "group": "brew", "check": "which nvim", "install": "brew install neovim" },
+    { "name": "ripgrep", "profiles": ["macbook"], "tags": ["brew", "dev"], "group": "brew", "check": "which rg", "install": "brew install ripgrep" },
+    { "name": "nodejs", "profiles": ["macbook"], "tags": ["runtime", "node"], "check": "which node", "install": "asdf install nodejs 22" }
   ]
 }
 ```
@@ -306,8 +361,8 @@ Here, neovim and ripgrep run sequentially (same group), while nodejs runs in par
 ```json
 {
   "items": [
-    { "name": "homebrew", "check": "which brew", "install": "/bin/bash -c \"$(curl -fsSL ...)\"" },
-    { "name": "neovim", "check": "which nvim", "install": "brew install neovim", "dependsOn": ["homebrew"] }
+    { "name": "homebrew", "profiles": ["macbook"], "tags": ["brew", "bootstrap"], "check": "which brew", "install": "/bin/bash -c \"$(curl -fsSL ...)\"" },
+    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "check": "which nvim", "install": "brew install neovim", "dependsOn": ["homebrew"] }
   ]
 }
 ```
@@ -319,6 +374,8 @@ If a dependency fails or times out, only its downstream dependents are blocked. 
 ```json
 {
   "name": "xcode-tools",
+  "profiles": ["macbook"],
+  "tags": ["xcode", "developer-tools"],
   "check": "xcode-select -p",
   "install": "xcode-select --install",
   "timeout": 1800000
@@ -329,30 +386,36 @@ Timeouts are specified in milliseconds and apply to check, install, and update c
 
 ### Profiles
 
-Different configurations for different machines:
+Profiles are topology surfaces: where an item is allowed to run. Tags are technology or workflow slices: what kind of thing an item is. The same item can belong to multiple profiles and multiple tags.
 
 ```json
 {
-  "profiles": {
-    "work": {
-      "exclude": ["personal-repos", "gaming-tools"],
-      "items": [
-        { "name": "slack", "check": "which slack", "install": "brew install --cask slack" }
-      ]
-    },
-    "personal": {
-      "exclude": ["work-vpn"],
-      "items": []
-    }
-  },
   "items": [
-    { "name": "neovim", "check": "which nvim", "install": "brew install neovim" },
-    { "name": "personal-repos", "check": "~/.personal", "install": "git clone ...", "onCheck": "path-exists" }
+    {
+      "name": "homebrew",
+      "profiles": ["macbook"],
+      "tags": ["brew", "bootstrap"],
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    },
+    {
+      "name": "tailscale",
+      "profiles": ["macbook", "server-home"],
+      "tags": ["networking", "vpn"],
+      "check": "which tailscale",
+      "install": { "source": "brew", "cask": "tailscale" },
+      "dependsOn": ["homebrew"]
+    }
   ]
 }
 ```
 
-Use with: `rig --profile work`
+Bare `rig` asks for a profile interactively. Headless runs must name one:
+
+```bash
+rig --ci --profile macbook
+rig --ci --profile server-home --dry-run
+```
 
 ### Backups
 
@@ -361,9 +424,11 @@ Automatically backup files before overwriting:
 ```json
 {
   "name": "nvim-config",
+  "profiles": ["macbook"],
+  "tags": ["editor", "dotfiles"],
   "check": "~/.config/nvim",
   "onCheck": "path-exists",
-  "install": { "source": "git", "repo": "...", "path": "~/.config/nvim" },
+  "install": { "source": "git", "repo": "https://github.com/username/nvim-config.git", "path": "~/.config/nvim" },
   "backup": "~/.config/nvim"
 }
 ```
@@ -377,15 +442,49 @@ Filter items by tags:
 ```json
 {
   "items": [
-    { "name": "neovim", "check": "which nvim", "install": "...", "tags": ["editor", "dev"] },
-    { "name": "slack", "check": "which slack", "install": "...", "tags": ["communication"] }
+    { "name": "neovim", "profiles": ["macbook"], "check": "which nvim", "install": "...", "tags": ["editor", "dev"] },
+    { "name": "slack", "profiles": ["macbook"], "check": "which slack", "install": "...", "tags": ["communication"] }
   ]
 }
 ```
 
 ```bash
-rig --tags editor        # Only items with "editor" tag
-rig --tags dev --tags editor  # Items with "dev" OR "editor"
+rig --ci --profile macbook --tags editor
+rig --ci --profile macbook --tags dev --tags editor
+```
+
+Tag filters are evaluated inside the selected profile first, then dependencies are included. Dependencies must also be available on the active profile, so shared prerequisites should list every profile that can depend on them.
+
+### Server-Only Services
+
+Put services that should never install on a daily workstation in a server profile only:
+
+```json
+{
+  "name": "continuwuity-matrix-homeserver",
+  "profiles": ["server-home"],
+  "tags": ["server", "matrix", "docker", "tailscale"],
+  "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\" && tailscale serve status 2>/dev/null | grep -q '127.0.0.1:6167'",
+  "install": {
+    "source": "script",
+    "interpreter": "zsh",
+    "cwd": "~/.matrix/continuwuity",
+    "script": "set -euo pipefail\nmkdir -p data secrets\ncat > compose.yml <<'YAML'\nservices:\n  homeserver:\n    image: forgejo.ellis.link/continuwuation/continuwuity:latest\n    ports:\n      - \"127.0.0.1:6167:6167\"\nYAML\ndocker compose up -d\ntailscale serve --bg --yes http://127.0.0.1:6167"
+  },
+  "update": {
+    "source": "script",
+    "interpreter": "zsh",
+    "cwd": "~/.matrix/continuwuity",
+    "script": "set -euo pipefail\ndocker compose pull\ndocker compose up -d"
+  },
+  "dependsOn": ["orbstack", "tailscale"]
+}
+```
+
+Any dependencies, such as `orbstack` or `tailscale` above, must also include `server-home` in their own `profiles` arrays.
+
+```bash
+rig --ci --profile server-home --tags server --dry-run
 ```
 
 ## CLI Options
@@ -395,7 +494,8 @@ rig [options] [config-source]
 
 Options:
   -c, --config <source> Path to a local config file or HTTPS config URL (default: ./system-config.json)
-  -p, --profile <name>  Profile to apply
+  -p, --profile <name>  Profile/topology surface to apply in headless mode
+  --ci                  Run non-interactively; requires --profile <name>
   -d, --dry-run         Show what would be installed without making changes
   --apply               Execute an HTTPS config source after review (remote configs preview by default)
   -t, --tags <tag>      Filter items by tags (can be repeated)
@@ -409,35 +509,35 @@ Options:
 ### Examples
 
 ```bash
-# Use a custom local config
+# Open the interactive TUI with a custom local config
 rig ~/my-config.json
 
 # Use an explicit config flag
 rig --config ~/my-config.json
 
-# Review a remote config first
-rig https://example.com/system-config.json
+# Review a remote config first in headless mode
+rig --ci --profile macbook https://example.com/system-config.json
 
 # Apply a remote config after review
-rig --apply https://example.com/system-config.json
+rig --ci --profile macbook --apply https://example.com/system-config.json
 
 # Force preview for a remote config explicitly
-rig --dry-run https://example.com/system-config.json
+rig --ci --profile macbook --dry-run https://example.com/system-config.json
 
-# Apply work profile
-rig --profile work
+# Apply macbook profile headlessly
+rig --ci --profile macbook
 
 # Install specific items
-rig --only neovim --only ripgrep
+rig --ci --profile macbook --only neovim --only ripgrep
 
 # Install by tags
-rig --tags dev
+rig --ci --profile macbook --tags dev
 ```
 
 ## How It Works
 
 1. **Load**: Read and validate the JSON configuration source
-2. **Resolve**: Apply profile (exclude items, add profile-specific items)
+2. **Resolve**: Select items in the chosen profile, then apply tag or item filters and dependency expansion
 3. **Plan**: Build dependency graph, topological sort
 4. **Detect**: Run check commands to determine current state
 5. **Execute**: Install missing items with group-based concurrency and dependency-isolated failure handling
@@ -447,7 +547,7 @@ rig --tags dev
 
 ```bash
 # Run in development mode
-bun run dev -- --dry-run
+bun run dev -- --ci --profile macbook --dry-run
 
 # Run tests
 bun run test

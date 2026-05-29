@@ -9,7 +9,7 @@ import type {
 } from "../schema/config.js";
 import type { BrewService } from "../services/BrewService.js";
 import type { GitService } from "../services/GitService.js";
-import type { ShellResult, ShellService } from "../services/ShellService.js";
+import type { ShellExecutionOptions, ShellResult, ShellService } from "../services/ShellService.js";
 import type { BrewError, FileSystemInstallError, GitError, ShellError } from "../errors.js";
 import { expandPath } from "../utils.js";
 import type { ExecutorOptions, ItemCheckResult } from "./Executor.js";
@@ -59,33 +59,29 @@ const emitCommandStream = (
   }
 
   for (const line of normalized.split(/\r?\n/)) {
+    options?.onOutput?.({ itemName, stream, line });
     emitVerbose(options, `[${itemName}] ${stream}: ${line}`);
   }
-};
-
-const emitCommandOutput = (
-  itemName: string,
-  result: ShellResult,
-  options: ExecutorOptions | undefined,
-): void => {
-  emitCommandStream(itemName, "stdout", result.stdout, options);
-  emitCommandStream(itemName, "stderr", result.stderr, options);
 };
 
 const toTimeoutOptions = (
   timeout: ItemTimeoutInput | undefined,
 ): { timeout: ItemTimeoutInput } | undefined => (timeout === undefined ? undefined : { timeout });
 
-const toScriptExecOptions = (
+const toCommandOptions = (
+  itemName: string,
   timeout: ItemTimeoutInput | undefined,
   cwd: string | undefined,
-): { timeout?: ItemTimeoutInput; cwd?: string } | undefined => {
-  const options = {
+  executorOptions: ExecutorOptions | undefined,
+): ShellExecutionOptions | undefined => {
+  const shellOptions = {
     ...(timeout === undefined ? {} : { timeout }),
     ...(cwd === undefined ? {} : { cwd }),
+    onStdout: (chunk: string) => emitCommandStream(itemName, "stdout", chunk, executorOptions),
+    onStderr: (chunk: string) => emitCommandStream(itemName, "stderr", chunk, executorOptions),
   };
 
-  return Object.keys(options).length === 0 ? undefined : options;
+  return shellOptions;
 };
 
 const runShellCommand = (
@@ -95,9 +91,7 @@ const runShellCommand = (
   timeout: SystemItem["timeout"],
   options: ExecutorOptions | undefined,
 ): Effect.Effect<ShellResult, ShellError> =>
-  shell
-    .run(command, toTimeoutOptions(timeout))
-    .pipe(Effect.tap((result) => Effect.sync(() => emitCommandOutput(itemName, result, options))));
+  shell.run(command, toCommandOptions(itemName, timeout, undefined, options));
 
 const scriptFilePrefix = (itemName: string): string =>
   `rig-${itemName.replace(/[^a-zA-Z0-9_.-]/g, "-")}-`;
@@ -141,13 +135,11 @@ const runScriptCommand = (
                 mapFileSystemError(scriptPath, `Failed to write script "${scriptPath}"`),
               ),
             );
-          return yield* shell
-            .exec(command.interpreter, [scriptPath], toScriptExecOptions(timeout, cwd))
-            .pipe(
-              Effect.tap((result) =>
-                Effect.sync(() => emitCommandOutput(itemName, result, options)),
-              ),
-            );
+          return yield* shell.exec(
+            command.interpreter,
+            [scriptPath],
+            toCommandOptions(itemName, timeout, cwd, options),
+          );
         }),
       (scriptPath) => fs.remove(scriptPath).pipe(Effect.catchAll(() => Effect.void)),
     );
@@ -260,11 +252,14 @@ const installItem = (
   ShellService
 > => {
   if (isGitInstall(item.install)) {
-    return git.clone(item.install, toTimeoutOptions(item.timeout));
+    return git.clone(item.install, toCommandOptions(item.name, item.timeout, undefined, options));
   }
 
   if (isBrewInstall(item.install)) {
-    return brew.install(item.install, toTimeoutOptions(item.timeout));
+    return brew.install(
+      item.install,
+      toCommandOptions(item.name, item.timeout, undefined, options),
+    );
   }
 
   if (isDirInstall(item.install)) {
@@ -276,10 +271,13 @@ const installItem = (
   }
 
   if (isSkillsInstall(item.install)) {
-    return shell.exec("env", getSkillsAddArgs(item.install), toTimeoutOptions(item.timeout)).pipe(
-      Effect.tap((result) => Effect.sync(() => emitCommandOutput(item.name, result, options))),
-      Effect.asVoid,
-    );
+    return shell
+      .exec(
+        "env",
+        getSkillsAddArgs(item.install),
+        toCommandOptions(item.name, item.timeout, undefined, options),
+      )
+      .pipe(Effect.asVoid);
   }
 
   if (isScriptCommand(item.install)) {

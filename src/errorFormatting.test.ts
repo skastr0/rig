@@ -32,7 +32,7 @@ describe("formatError", () => {
     });
 
     expect(formatError(error)).toBe(
-      "Git error for https://example.com/repo.git: clone failed\n  Command: git clone https://example.com/repo.git\n  Exit code: 128\n  network unavailable",
+      "Git error for https://example.com/repo.git: clone failed\n  Command: git clone https://example.com/repo.git\n  Exit code: 128\n  stderr:\nnetwork unavailable",
     );
   });
 });

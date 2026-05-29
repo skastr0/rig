@@ -15,7 +15,6 @@ import {
 import { ConfigError, ValidationError } from "./errors.js";
 import { formatError } from "./errorFormatting.js";
 import type { SystemItem } from "./schema/config.js";
-import { runInteractiveCommand } from "./tui/runInteractiveCommand.js";
 
 const formatItemList = (items: readonly string[]): string => items.join(", ");
 
@@ -69,10 +68,6 @@ const formatSelectionReason = (
 
       if (rootSelection && rootSelection !== depender) {
         lines.push(`Root selected item: ${rootSelection}`);
-      }
-
-      if (reason.crossesProfile) {
-        lines.push(`Included across profile boundaries from "${reason.rootProfile}".`);
       }
 
       return lines;
@@ -210,8 +205,26 @@ const loadSelectionContext = (
     const executionMode = readOnlyIntrospection
       ? undefined
       : resolveExecutionMode(configSource, options);
+    const statusInspectionMode =
+      options.status && configSource._tag === "https"
+        ? resolveExecutionMode(configSource, {
+            dryRun: false,
+            apply: options.apply,
+          })
+        : undefined;
 
-    reporter.printConfigSource(configSource, executionMode);
+    reporter.printConfigSource(configSource, executionMode ?? statusInspectionMode);
+
+    if (configSource._tag === "https" && options.status && !options.apply) {
+      return yield* Effect.fail(
+        new ValidationError({
+          issues: [
+            "Remote --status executes check commands and requires --apply.",
+            "Review the remote config first, then re-run with --apply --status to inspect local state.",
+          ],
+        }),
+      );
+    }
 
     const config = yield* configService.load(configSource);
     const profile = yield* requireHeadlessProfile(options, config.items);
@@ -264,6 +277,11 @@ const runExecutionCommand = (
   executionMode: ExecutionMode | undefined,
 ) =>
   Effect.gen(function* () {
+    if (executionMode?._tag === "remote_preview") {
+      reporter.printStaticPreview(plan, options.update);
+      return;
+    }
+
     reporter.printPlan(plan, executionMode?.dryRun);
 
     const executeOptions = {
@@ -318,12 +336,28 @@ const isInteractiveTerminal = (): boolean =>
 
 const runInteractiveCommandIfRequested = (options: CliOptions, configService: ConfigService) =>
   Effect.gen(function* () {
-    if (options.ci || !isInteractiveTerminal()) {
+    if (options.ci || options.status || options.why !== undefined || !isInteractiveTerminal()) {
       return false;
     }
 
     const configSource = yield* resolveConfigSource(options.config);
     const config = yield* configService.load(configSource);
+    const availableProfiles = collectAvailableProfiles(config.items);
+
+    if (options.profile !== undefined && !availableProfiles.includes(options.profile)) {
+      return yield* Effect.fail(
+        new ValidationError({
+          issues: [
+            `Unknown profile "${options.profile}".`,
+            `Available profiles: ${formatAvailableProfiles(availableProfiles)}.`,
+          ],
+        }),
+      );
+    }
+
+    const { runInteractiveCommand } = yield* Effect.promise(
+      () => import("./tui/runInteractiveCommand.js"),
+    );
 
     yield* runInteractiveCommand({ options, configSource, items: config.items });
 

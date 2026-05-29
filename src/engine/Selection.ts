@@ -17,7 +17,6 @@ export interface DependencySelectionReason {
   readonly type: "dependency";
   readonly rootProfile: string;
   readonly path: readonly string[];
-  readonly crossesProfile: boolean;
 }
 
 export type SelectionReason = DirectSelectionReason | DependencySelectionReason;
@@ -113,6 +112,10 @@ const expandDependencySelections = (
         continue;
       }
 
+      if (!dependency.profiles.includes(current.rootProfile)) {
+        continue;
+      }
+
       const dependencyPath = [...current.path, dependencyName];
 
       selectedNames.add(dependencyName);
@@ -120,7 +123,6 @@ const expandDependencySelections = (
         type: "dependency",
         rootProfile: current.rootProfile,
         path: dependencyPath,
-        crossesProfile: !dependency.profiles.includes(current.rootProfile),
       });
       pending.push({ item: dependency, path: dependencyPath, rootProfile: current.rootProfile });
     }

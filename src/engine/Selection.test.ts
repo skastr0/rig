@@ -118,11 +118,10 @@ describe("selectItems", () => {
       type: "dependency",
       rootProfile: "macbook",
       path: ["media-workflow", "yt-dlp", "homebrew"],
-      crossesProfile: false,
     });
   });
 
-  it("pulls dependencies across profile boundaries after direct selection", () => {
+  it("does not pull dependencies outside the active profile", () => {
     const items = [
       makeItem("tailscale", { profiles: ["macbook"] }),
       makeItem("matrix-server", {
@@ -138,15 +137,7 @@ describe("selectItems", () => {
       tags: ["matrix"],
     });
 
-    expect(selection.selectedItems.map((item) => item.name)).toEqual([
-      "tailscale",
-      "matrix-server",
-    ]);
-    expect(selection.reasons.get("tailscale")).toEqual({
-      type: "dependency",
-      rootProfile: "server-home",
-      path: ["matrix-server", "tailscale"],
-      crossesProfile: true,
-    });
+    expect(selection.selectedItems.map((item) => item.name)).toEqual(["matrix-server"]);
+    expect(selection.reasons.get("tailscale")).toBeUndefined();
   });
 });

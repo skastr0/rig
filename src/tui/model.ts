@@ -1,4 +1,5 @@
 import type { ExecutionResult } from "../engine/Executor.js";
+import { installInspection } from "../engine/InstallInspection.js";
 import {
   analyzeSelection,
   collectAvailableProfiles,
@@ -9,7 +10,7 @@ import {
 import type { SystemItem } from "../schema/config.js";
 
 export type TuiStage = "profile" | "tags" | "review" | "running" | "done";
-export type LogKind = "system" | "progress" | "verbose" | "error";
+export type LogKind = "system" | "progress" | "preview" | "output" | "verbose" | "error";
 
 export interface ProfileRow {
   readonly name: string;
@@ -28,7 +29,6 @@ export interface SelectionSummary {
   readonly analysis: SelectionAnalysis;
   readonly directCount: number;
   readonly dependencyCount: number;
-  readonly crossProfileDependencyCount: number;
 }
 
 export interface TuiLogLine {
@@ -72,11 +72,11 @@ export const summarizeSelection = (
   items: readonly SystemItem[],
   profile: string,
   tags: readonly string[],
+  only: readonly string[] = [],
 ): SelectionSummary => {
-  const analysis = analyzeSelection(items, { profile, tags, only: [] });
+  const analysis = analyzeSelection(items, { profile, tags, only });
   let directCount = 0;
   let dependencyCount = 0;
-  let crossProfileDependencyCount = 0;
 
   for (const reason of analysis.reasons.values()) {
     if (reason.type === "direct") {
@@ -85,12 +85,29 @@ export const summarizeSelection = (
     }
 
     dependencyCount += 1;
-    if (reason.crossesProfile) {
-      crossProfileDependencyCount += 1;
-    }
   }
 
-  return { analysis, directCount, dependencyCount, crossProfileDependencyCount };
+  return { analysis, directCount, dependencyCount };
+};
+
+export const getItemPreviewLines = (
+  item: SystemItem | undefined,
+  includeUpdate: boolean,
+): readonly string[] => {
+  if (!item) {
+    return [];
+  }
+
+  const installPreview = installInspection.getInstallPreview(item.install);
+  const previews = [
+    installPreview,
+    ...(includeUpdate && item.update ? [installInspection.getUpdatePreview(item.update)] : []),
+  ];
+
+  return previews.flatMap((preview) => [
+    preview.label,
+    ...preview.steps.map((step) => `  ${step}`),
+  ]);
 };
 
 export const formatReasonBadge = (reason: SelectionReason | undefined): string => {
@@ -102,7 +119,7 @@ export const formatReasonBadge = (reason: SelectionReason | undefined): string =
     return "direct";
   }
 
-  return reason.crossesProfile ? "dependency / cross-profile" : "dependency";
+  return "dependency";
 };
 
 export const formatExecutionResultLog = (result: ExecutionResult): string => {
@@ -110,6 +127,17 @@ export const formatExecutionResultLog = (result: ExecutionResult): string => {
   const error = result.error ? `: ${result.error.trim()}` : "";
 
   return `${result.name}: ${result.action}${detail}${error}`;
+};
+
+export const formatExecutionPreviewLogs = (result: ExecutionResult): readonly string[] => {
+  if (!result.preview) {
+    return [];
+  }
+
+  return [
+    `${result.name}: ${result.preview.label}`,
+    ...result.preview.steps.map((step) => `${result.name}: ${step}`),
+  ];
 };
 
 export const filterLogsByItem = (

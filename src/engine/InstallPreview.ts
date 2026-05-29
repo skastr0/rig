@@ -90,14 +90,19 @@ const getGitInstallPreviewSteps = (install: GitInstall): readonly string[] => {
   return [formatCommand("git", cloneArgs)];
 };
 
-const countScriptLines = (script: string): number => script.split(/\r?\n/).length;
+const getScriptLines = (script: string): readonly string[] =>
+  script.replace(/\r?\n$/, "").split(/\r?\n/);
 
-const getScriptPreviewStep = (command: ScriptCommand): string => {
-  const lineCount = countScriptLines(command.script);
+const getScriptPreviewSteps = (command: ScriptCommand): readonly string[] => {
+  const scriptLines = getScriptLines(command.script);
+  const lineCount = scriptLines.length;
   const cwd = command.cwd ? ` in ${command.cwd}` : "";
   const lineLabel = lineCount === 1 ? "1 line" : `${lineCount} lines`;
 
-  return `run ${command.interpreter} script (${lineLabel})${cwd}`;
+  return [
+    `run ${command.interpreter} script (${lineLabel})${cwd}`,
+    ...scriptLines.map((line, index) => `script:${index + 1}: ${line}`),
+  ];
 };
 
 const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string[] => {
@@ -107,7 +112,7 @@ const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string
   if (isBrewInstall(install)) return getBrewInstallPreviewSteps(install);
   if (isGitInstall(install)) return getGitInstallPreviewSteps(install);
   if (isSkillsInstall(install)) return [getSkillsAddCommand(install)];
-  if (isScriptCommand(install)) return [getScriptPreviewStep(install)];
+  if (isScriptCommand(install)) return getScriptPreviewSteps(install);
   return [];
 };
 
@@ -137,5 +142,5 @@ export const getUpdatePreview = (command: NonNullable<SystemItem["update"]>): Ex
       }
     : {
         label: "script update command",
-        steps: [getScriptPreviewStep(command)],
+        steps: getScriptPreviewSteps(command),
       };

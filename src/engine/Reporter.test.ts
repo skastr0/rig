@@ -131,6 +131,31 @@ describe("Reporter", () => {
 
       expect(output.some((line) => line.includes("Dry Run"))).toBe(true);
     });
+
+    it("should print remote static preview without implying check execution", async () => {
+      const reporter = createReporter({ noColor: true });
+      const items = [makeItem("ripgrep")];
+      const plan = await Effect.runPromise(topologicalSort(items));
+
+      reporter.printStaticPreview(plan);
+
+      expect(output.some((line) => line.includes("Remote Static Preview"))).toBe(true);
+      expect(output.some((line) => line.includes("Checks are not executed"))).toBe(true);
+      expect(output.some((line) => line.includes("check command not executed"))).toBe(true);
+      expect(output.some((line) => line.includes("which ripgrep"))).toBe(true);
+      expect(output.some((line) => line.includes("brew install ripgrep"))).toBe(true);
+    });
+
+    it("should include update commands in remote static preview when requested", async () => {
+      const reporter = createReporter({ noColor: true });
+      const items = [{ ...makeItem("ripgrep"), update: "brew upgrade ripgrep" }];
+      const plan = await Effect.runPromise(topologicalSort(items));
+
+      reporter.printStaticPreview(plan, true);
+
+      expect(output.some((line) => line.includes("shell update command"))).toBe(true);
+      expect(output.some((line) => line.includes("brew upgrade ripgrep"))).toBe(true);
+    });
   });
 
   describe("printProgress", () => {

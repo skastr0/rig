@@ -8,6 +8,7 @@ interface RigKeyboardState {
 
 interface RigKeyboardActions {
   readonly exit: () => void;
+  readonly cancel: () => void;
   readonly back: () => void;
   readonly toggleTag: () => void;
   readonly toggleVerbose: () => void;
@@ -23,7 +24,16 @@ export const useRigKeyboard = (state: RigKeyboardState, actions: RigKeyboardActi
     const name = key.name.toLowerCase();
 
     if (key.ctrl && name === "c") {
-      actions.exit();
+      if (state.running) {
+        actions.cancel();
+      } else {
+        actions.exit();
+      }
+      return;
+    }
+
+    if (name === "q" && state.running) {
+      actions.cancel();
       return;
     }
 

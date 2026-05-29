@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { Context, Effect, Layer, Duration } from "effect";
 import { ShellError } from "../errors.js";
 
@@ -7,18 +8,25 @@ export interface ShellResult {
   readonly exitCode: number;
 }
 
+export interface ShellExecutionOptions {
+  readonly timeout?: Duration.DurationInput;
+  readonly cwd?: string;
+  readonly onStdout?: (chunk: string) => void;
+  readonly onStderr?: (chunk: string) => void;
+}
+
 export interface ShellService {
   /** Run a shell command string (via sh -c). Use for user-configured commands only. */
   readonly run: (
     command: string,
-    options?: { timeout?: Duration.DurationInput },
+    options?: ShellExecutionOptions,
   ) => Effect.Effect<ShellResult, ShellError>;
 
   /** Execute a command with explicit args (no shell interpolation). Safe from injection. */
   readonly exec: (
     command: string,
     args: readonly string[],
-    options?: { timeout?: Duration.DurationInput; cwd?: string },
+    options?: ShellExecutionOptions,
   ) => Effect.Effect<ShellResult, ShellError>;
 }
 
@@ -33,67 +41,201 @@ const formatTimeoutMessage = (timeoutMs: number, stderr: string): string => {
     : `Timed out after ${timeoutMs}ms`;
 };
 
+interface SpawnResult extends ShellResult {
+  readonly timedOut: boolean;
+  readonly interrupted: boolean;
+  readonly timeoutMs: number;
+  readonly killError?: string;
+}
+
+const killSignalDelayMs = 1_000;
+
+const formatSignalError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const sendSignal = (pid: number, signal: NodeJS.Signals): string | undefined => {
+  try {
+    process.kill(pid, signal);
+    return undefined;
+  } catch (error) {
+    return formatSignalError(error);
+  }
+};
+
+const signalProcessGroup = (proc: ChildProcess, signal: NodeJS.Signals): string | undefined => {
+  const pid = proc.pid;
+
+  if (pid === undefined) {
+    return proc.kill(signal) ? undefined : `Failed to send ${signal} to child process`;
+  }
+
+  const groupError = sendSignal(-pid, signal);
+  if (groupError === undefined) {
+    return undefined;
+  }
+
+  const processError = sendSignal(pid, signal);
+  return processError === undefined
+    ? undefined
+    : `Failed to send ${signal} to process group ${pid}: ${groupError}; fallback process signal failed: ${processError}`;
+};
+
 const spawnProcess = (
   args: readonly string[],
-  options?: { timeout?: Duration.DurationInput; cwd?: string },
+  options?: ShellExecutionOptions,
 ): Effect.Effect<ShellResult, ShellError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const timeoutMs = options?.timeout ? Duration.toMillis(options.timeout) : DEFAULT_TIMEOUT_MS;
-      let timedOut = false;
+  Effect.async<SpawnResult, ShellError>((resume, signal) => {
+    const timeoutMs = options?.timeout ? Duration.toMillis(options.timeout) : DEFAULT_TIMEOUT_MS;
+    let completed = false;
+    let timedOut = false;
+    let interrupted = false;
+    let killError: string | undefined;
 
-      const proc = Bun.spawn(args as string[], {
-        stdout: "pipe",
-        stderr: "pipe",
-        ...(options?.cwd ? { cwd: options.cwd } : {}),
-      });
+    const [command, ...commandArgs] = args;
+    if (!command) {
+      resume(
+        Effect.fail(
+          new ShellError({
+            command: "",
+            exitCode: -1,
+            stderr: "Missing command",
+          }),
+        ),
+      );
+      return;
+    }
 
-      const timeoutId = setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, timeoutMs);
+    const proc = spawn(command, commandArgs, {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+    });
+    let killEscalationId: ReturnType<typeof setTimeout> | undefined;
+    let stdout = "";
+    let stderr = "";
 
-      try {
-        const exitCode = await proc.exited;
-        const stdout = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
+    proc.stdout.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      stdout += text;
+      options?.onStdout?.(text);
+    });
 
-        return { stdout, stderr, exitCode, timedOut, timeoutMs };
-      } finally {
-        clearTimeout(timeoutId);
+    proc.stderr.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      stderr += text;
+      options?.onStderr?.(text);
+    });
+
+    const killProcess = (): void => {
+      if (!completed) {
+        killError ??= signalProcessGroup(proc, "SIGTERM");
+        killEscalationId ??= setTimeout(() => {
+          if (!completed) {
+            killError ??= signalProcessGroup(proc, "SIGKILL");
+          }
+        }, killSignalDelayMs);
       }
-    },
-    catch: () =>
-      new ShellError({
-        command: args.join(" "),
-        exitCode: -1,
-        stderr: "Process execution failed",
-      }),
+    };
+
+    const abortProcess = (): void => {
+      interrupted = true;
+      killProcess();
+    };
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      killProcess();
+    }, timeoutMs);
+
+    signal.addEventListener("abort", abortProcess, { once: true });
+    if (signal.aborted) {
+      abortProcess();
+    }
+
+    proc.once("error", () => {
+      completed = true;
+      clearTimeout(timeoutId);
+      if (killEscalationId !== undefined) {
+        clearTimeout(killEscalationId);
+      }
+      signal.removeEventListener("abort", abortProcess);
+      resume(
+        Effect.fail(
+          new ShellError({
+            command: args.join(" "),
+            exitCode: -1,
+            ...(stdout.length === 0 ? {} : { stdout }),
+            stderr: stderr || "Process execution failed",
+          }),
+        ),
+      );
+    });
+
+    proc.once("close", (exitCode) => {
+      if (completed) {
+        return;
+      }
+
+      completed = true;
+      clearTimeout(timeoutId);
+      if (killEscalationId !== undefined) {
+        clearTimeout(killEscalationId);
+      }
+      signal.removeEventListener("abort", abortProcess);
+      resume(
+        Effect.succeed({
+          stdout,
+          stderr,
+          exitCode: exitCode ?? -1,
+          timedOut,
+          interrupted,
+          timeoutMs,
+          ...(killError === undefined ? {} : { killError }),
+        }),
+      );
+    });
   }).pipe(
     Effect.flatMap((result) =>
-      result.timedOut
+      result.interrupted
         ? Effect.fail(
             new ShellError({
               command: args.join(" "),
               exitCode: -1,
-              stderr: formatTimeoutMessage(result.timeoutMs, result.stderr),
-              timedOut: true,
-              timeoutMs: result.timeoutMs,
+              stdout: result.stdout,
+              stderr:
+                result.killError === undefined
+                  ? "Process interrupted"
+                  : `Process interrupted; ${result.killError}`,
             }),
           )
-        : result.exitCode !== 0
+        : result.timedOut
           ? Effect.fail(
               new ShellError({
                 command: args.join(" "),
-                exitCode: result.exitCode,
-                stderr: result.stderr,
+                exitCode: -1,
+                stdout: result.stdout,
+                stderr:
+                  result.killError === undefined
+                    ? formatTimeoutMessage(result.timeoutMs, result.stderr)
+                    : `${formatTimeoutMessage(result.timeoutMs, result.stderr)}; ${result.killError}`,
+                timedOut: true,
+                timeoutMs: result.timeoutMs,
               }),
             )
-          : Effect.succeed({
-              stdout: result.stdout,
-              stderr: result.stderr,
-              exitCode: result.exitCode,
-            }),
+          : result.exitCode !== 0
+            ? Effect.fail(
+                new ShellError({
+                  command: args.join(" "),
+                  exitCode: result.exitCode,
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                }),
+              )
+            : Effect.succeed({
+                stdout: result.stdout,
+                stderr: result.stderr,
+                exitCode: result.exitCode,
+              }),
     ),
   );
 

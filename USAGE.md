@@ -24,6 +24,8 @@ Create `system-config.json` in your project or home directory:
   "items": [
     {
       "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["editor", "dev"],
       "check": "which nvim",
       "install": "brew install neovim",
       "group": "brew"
@@ -35,11 +37,14 @@ Create `system-config.json` in your project or home directory:
 Run:
 
 ```bash
-# See what would be installed
-rig --dry-run
-
-# Actually install
+# Open the interactive TUI
 rig
+
+# See what would be installed in headless mode
+rig --ci --profile macbook --dry-run
+
+# Actually install in headless mode
+rig --ci --profile macbook
 ```
 
 ### Understanding the Output
@@ -76,11 +81,11 @@ For standalone tools with no dependencies:
 ```json
 {
   "items": [
-    { "name": "ripgrep", "check": "which rg", "install": "brew install ripgrep", "group": "brew" },
-    { "name": "fd", "check": "which fd", "install": "brew install fd", "group": "brew" },
-    { "name": "bat", "check": "which bat", "install": "brew install bat", "group": "brew" },
-    { "name": "eza", "check": "which eza", "install": "brew install eza", "group": "brew" },
-    { "name": "zoxide", "check": "which zoxide", "install": "brew install zoxide", "group": "brew" }
+    { "name": "ripgrep", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which rg", "install": "brew install ripgrep", "group": "brew" },
+    { "name": "fd", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which fd", "install": "brew install fd", "group": "brew" },
+    { "name": "bat", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which bat", "install": "brew install bat", "group": "brew" },
+    { "name": "eza", "profiles": ["macbook"], "tags": ["brew", "shell"], "check": "which eza", "install": "brew install eza", "group": "brew" },
+    { "name": "zoxide", "profiles": ["macbook"], "tags": ["brew", "shell"], "check": "which zoxide", "install": "brew install zoxide", "group": "brew" }
   ]
 }
 ```
@@ -94,12 +99,16 @@ When a tool needs its config files:
   "items": [
     {
       "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["brew", "editor"],
       "check": "which nvim",
       "install": "brew install neovim",
       "group": "brew"
     },
     {
       "name": "nvim-config",
+      "profiles": ["macbook"],
+      "tags": ["editor", "dotfiles"],
       "check": "~/.config/nvim/init.lua",
       "onCheck": "path-exists",
       "install": {
@@ -121,18 +130,24 @@ When a tool needs its config files:
   "items": [
     {
       "name": "asdf",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "version-manager"],
       "check": "which asdf",
       "install": "brew install asdf",
       "group": "brew"
     },
     {
       "name": "nodejs-plugin",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "asdf plugin list | grep -q nodejs",
       "install": "asdf plugin add nodejs",
       "dependsOn": ["asdf"]
     },
     {
       "name": "nodejs-22",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "asdf list nodejs | grep -q 22",
       "install": "asdf install nodejs 22 && asdf global nodejs 22",
       "dependsOn": ["nodejs-plugin"]
@@ -143,24 +158,24 @@ When a tool needs its config files:
 
 ### Pattern 4: Conditional Installation
 
-Use tags to organize optional components:
+Profiles are topology surfaces, such as `macbook`, `workstation`, or `server-home`. Tags are technology or workflow slices, such as `editor`, `devops`, or `server`. Every item declares both.
 
 ```json
 {
   "items": [
-    { "name": "neovim", "check": "which nvim", "install": "...", "tags": ["editor", "essential"] },
-    { "name": "emacs", "check": "which emacs", "install": "...", "tags": ["editor"] },
-    { "name": "vscode", "check": "which code", "install": "...", "tags": ["editor", "gui"] },
-    { "name": "docker", "check": "which docker", "install": "...", "tags": ["devops"] },
-    { "name": "kubectl", "check": "which kubectl", "install": "...", "tags": ["devops", "k8s"] }
+    { "name": "neovim", "profiles": ["macbook"], "check": "which nvim", "install": "...", "tags": ["editor", "essential"] },
+    { "name": "emacs", "profiles": ["macbook"], "check": "which emacs", "install": "...", "tags": ["editor"] },
+    { "name": "vscode", "profiles": ["macbook"], "check": "which code", "install": "...", "tags": ["editor", "gui"] },
+    { "name": "docker", "profiles": ["macbook", "server-home"], "check": "which docker", "install": "...", "tags": ["devops"] },
+    { "name": "kubectl", "profiles": ["macbook"], "check": "which kubectl", "install": "...", "tags": ["devops", "k8s"] }
   ]
 }
 ```
 
 ```bash
-rig --tags essential      # Only essential items
-rig --tags editor         # All editors
-rig --tags devops         # DevOps tools
+rig --ci --profile macbook --tags essential
+rig --ci --profile macbook --tags editor
+rig --ci --profile server-home --tags devops
 ```
 
 ## Package Manager Examples
@@ -172,11 +187,15 @@ rig --tags devops         # DevOps tools
   "items": [
     {
       "name": "homebrew",
+      "profiles": ["macbook"],
+      "tags": ["brew", "bootstrap"],
       "check": "which brew",
       "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     },
     {
       "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["brew", "editor"],
       "check": "which nvim",
       "install": "brew install neovim",
       "update": "brew upgrade neovim",
@@ -185,6 +204,8 @@ rig --tags devops         # DevOps tools
     },
     {
       "name": "firefox",
+      "profiles": ["macbook"],
+      "tags": ["brew", "browser"],
       "check": "/Applications/Firefox.app",
       "onCheck": "path-exists",
       "install": "brew install --cask firefox",
@@ -206,6 +227,8 @@ Before:
 ```json
 {
   "name": "neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
   "check": "which nvim",
   "install": "brew install neovim",
   "group": "brew"
@@ -217,6 +240,8 @@ After:
 ```json
 {
   "name": "neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
   "check": "which nvim",
   "install": {
     "source": "brew",
@@ -230,6 +255,8 @@ Native brew source also supports casks and taps:
 ```json
 {
   "name": "firefox",
+  "profiles": ["macbook"],
+  "tags": ["brew", "browser"],
   "check": "/Applications/Firefox.app",
   "onCheck": "path-exists",
   "install": {
@@ -242,6 +269,8 @@ Native brew source also supports casks and taps:
 ```json
 {
   "name": "nightly-neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
   "check": "which nvim",
   "install": {
     "source": "brew",
@@ -259,12 +288,16 @@ Native brew source also supports casks and taps:
   "items": [
     {
       "name": "build-essential",
+      "profiles": ["server"],
+      "tags": ["apt", "build-tools"],
       "check": "dpkg -l build-essential | grep -q ^ii",
       "install": "sudo apt-get update && sudo apt-get install -y build-essential",
       "group": "apt"
     },
     {
       "name": "neovim",
+      "profiles": ["server"],
+      "tags": ["apt", "editor"],
       "check": "which nvim",
       "install": "sudo apt-get install -y neovim",
       "group": "apt"
@@ -280,17 +313,23 @@ Native brew source also supports casks and taps:
   "items": [
     {
       "name": "rust",
+      "profiles": ["macbook"],
+      "tags": ["rust", "runtime"],
       "check": "which rustc",
       "install": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
     },
     {
       "name": "cargo-watch",
+      "profiles": ["macbook"],
+      "tags": ["rust", "dev"],
       "check": "which cargo-watch",
       "install": "cargo install cargo-watch",
       "dependsOn": ["rust"]
     },
     {
       "name": "starship",
+      "profiles": ["macbook"],
+      "tags": ["rust", "shell"],
       "check": "which starship",
       "install": "cargo install starship",
       "dependsOn": ["rust"]
@@ -306,18 +345,24 @@ Native brew source also supports casks and taps:
   "items": [
     {
       "name": "nodejs",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "which node",
       "install": "asdf install nodejs 22 && asdf global nodejs 22",
       "dependsOn": ["asdf", "nodejs-plugin"]
     },
     {
       "name": "pnpm",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "which pnpm",
       "install": "npm install -g pnpm",
       "dependsOn": ["nodejs"]
     },
     {
       "name": "typescript",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "which tsc",
       "install": "npm install -g typescript",
       "dependsOn": ["nodejs"]
@@ -337,6 +382,8 @@ Clone your entire dotfiles repo, then symlink or use stow:
   "items": [
     {
       "name": "dotfiles",
+      "profiles": ["macbook"],
+      "tags": ["dotfiles", "git"],
       "check": "~/.dotfiles",
       "onCheck": "path-exists",
       "install": {
@@ -347,12 +394,16 @@ Clone your entire dotfiles repo, then symlink or use stow:
     },
     {
       "name": "stow",
+      "profiles": ["macbook"],
+      "tags": ["brew", "dotfiles"],
       "check": "which stow",
       "install": "brew install stow",
       "group": "brew"
     },
     {
       "name": "dotfiles-link",
+      "profiles": ["macbook"],
+      "tags": ["dotfiles", "shell"],
       "check": "~/.zshrc",
       "onCheck": "path-exists",
       "install": "cd ~/.dotfiles && stow zsh nvim git",
@@ -372,6 +423,8 @@ Clone only specific folders from a large repo:
   "items": [
     {
       "name": "nvim-config",
+      "profiles": ["macbook"],
+      "tags": ["editor", "dotfiles"],
       "check": "~/.config/nvim",
       "onCheck": "path-exists",
       "install": {
@@ -395,6 +448,8 @@ For configs not in a repo:
   "items": [
     {
       "name": "zshrc",
+      "profiles": ["macbook"],
+      "tags": ["dotfiles", "shell"],
       "check": "~/.zshrc",
       "onCheck": "path-exists",
       "install": "curl -o ~/.zshrc https://raw.githubusercontent.com/username/dotfiles/main/.zshrc",
@@ -402,6 +457,8 @@ For configs not in a repo:
     },
     {
       "name": "gitconfig",
+      "profiles": ["macbook"],
+      "tags": ["dotfiles", "git"],
       "check": "~/.gitconfig",
       "onCheck": "path-exists",
       "install": "curl -o ~/.gitconfig https://raw.githubusercontent.com/username/dotfiles/main/.gitconfig",
@@ -420,11 +477,15 @@ For configs not in a repo:
   "items": [
     {
       "name": "homebrew",
+      "profiles": ["macbook"],
+      "tags": ["brew", "bootstrap"],
       "check": "which brew",
       "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     },
     {
       "name": "asdf",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "version-manager"],
       "check": "which asdf",
       "install": "brew install asdf",
       "group": "brew",
@@ -432,18 +493,24 @@ For configs not in a repo:
     },
     {
       "name": "nodejs-plugin",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "asdf plugin list | grep -q nodejs",
       "install": "asdf plugin add nodejs",
       "dependsOn": ["asdf"]
     },
     {
       "name": "nodejs",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "node --version | grep -q 22",
       "install": "asdf install nodejs 22 && asdf global nodejs 22",
       "dependsOn": ["nodejs-plugin"]
     },
     {
       "name": "pnpm",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "which pnpm",
       "install": "npm install -g pnpm",
       "dependsOn": ["nodejs"]
@@ -459,6 +526,8 @@ For configs not in a repo:
   "items": [
     {
       "name": "pyenv",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "python"],
       "check": "which pyenv",
       "install": "brew install pyenv",
       "group": "brew",
@@ -466,12 +535,16 @@ For configs not in a repo:
     },
     {
       "name": "python-3.12",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "python"],
       "check": "pyenv versions | grep -q 3.12",
       "install": "pyenv install 3.12 && pyenv global 3.12",
       "dependsOn": ["pyenv"]
     },
     {
       "name": "pipx",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "python"],
       "check": "which pipx",
       "install": "brew install pipx",
       "group": "brew",
@@ -479,6 +552,8 @@ For configs not in a repo:
     },
     {
       "name": "poetry",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "python"],
       "check": "which poetry",
       "install": "pipx install poetry",
       "dependsOn": ["pipx"]
@@ -494,23 +569,31 @@ For configs not in a repo:
   "items": [
     {
       "name": "rust",
+      "profiles": ["macbook"],
+      "tags": ["rust", "runtime"],
       "check": "which rustc",
       "install": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
     },
     {
       "name": "rust-analyzer",
+      "profiles": ["macbook"],
+      "tags": ["rust", "editor"],
       "check": "which rust-analyzer",
       "install": "rustup component add rust-analyzer",
       "dependsOn": ["rust"]
     },
     {
       "name": "cargo-watch",
+      "profiles": ["macbook"],
+      "tags": ["rust", "dev"],
       "check": "which cargo-watch",
       "install": "cargo install cargo-watch",
       "dependsOn": ["rust"]
     },
     {
       "name": "cargo-edit",
+      "profiles": ["macbook"],
+      "tags": ["rust", "dev"],
       "check": "cargo install --list | grep -q cargo-edit",
       "install": "cargo install cargo-edit",
       "dependsOn": ["rust"]
@@ -525,57 +608,45 @@ For configs not in a repo:
 
 ```json
 {
-  "profiles": {
-    "work": {
-      "exclude": ["gaming", "personal-repos", "entertainment"],
-      "items": [
-        {
-          "name": "slack",
-          "check": "/Applications/Slack.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask slack",
-          "group": "brew"
-        },
-        {
-          "name": "zoom",
-          "check": "/Applications/zoom.us.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask zoom",
-          "group": "brew"
-        },
-        {
-          "name": "work-vpn",
-          "check": "/Applications/Company VPN.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask company-vpn",
-          "group": "brew"
-        }
-      ]
-    },
-    "personal": {
-      "exclude": ["work-vpn", "work-tools"],
-      "items": [
-        {
-          "name": "steam",
-          "check": "/Applications/Steam.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask steam",
-          "group": "brew",
-          "tags": ["gaming"]
-        }
-      ]
-    }
-  },
   "items": [
     {
       "name": "neovim",
+      "profiles": ["work", "personal"],
       "check": "which nvim",
       "install": "brew install neovim",
       "group": "brew",
       "tags": ["essential"]
     },
     {
+      "name": "slack",
+      "profiles": ["work"],
+      "check": "/Applications/Slack.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask slack",
+      "group": "brew",
+      "tags": ["communication", "work"]
+    },
+    {
+      "name": "work-vpn",
+      "profiles": ["work"],
+      "check": "/Applications/Company VPN.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask company-vpn",
+      "group": "brew",
+      "tags": ["networking", "work"]
+    },
+    {
+      "name": "steam",
+      "profiles": ["personal"],
+      "check": "/Applications/Steam.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask steam",
+      "group": "brew",
+      "tags": ["gaming"]
+    },
+    {
       "name": "personal-repos",
+      "profiles": ["personal"],
       "check": "~/Projects/personal",
       "onCheck": "path-exists",
       "install": "mkdir -p ~/Projects/personal",
@@ -589,45 +660,89 @@ Usage:
 
 ```bash
 # On work machine
-rig --profile work
+rig --ci --profile work
 
 # On personal machine
-rig --profile personal
+rig --ci --profile personal
 
 # Just the essentials on any machine
-rig --tags essential
+rig --ci --profile work --tags essential
 ```
 
 ### Desktop vs Laptop
 
 ```json
 {
-  "profiles": {
-    "desktop": {
-      "items": [
-        {
-          "name": "obs",
-          "check": "/Applications/OBS.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask obs",
-          "group": "brew"
-        }
-      ]
+  "items": [
+    {
+      "name": "obs",
+      "profiles": ["desktop"],
+      "tags": ["media", "desktop"],
+      "check": "/Applications/OBS.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask obs",
+      "group": "brew"
     },
-    "laptop": {
-      "items": [
-        {
-          "name": "battery-toolkit",
-          "check": "/Applications/AlDente.app",
-          "onCheck": "path-exists",
-          "install": "brew install --cask aldente",
-          "group": "brew"
-        }
-      ]
+    {
+      "name": "battery-toolkit",
+      "profiles": ["laptop"],
+      "tags": ["power", "laptop"],
+      "check": "/Applications/AlDente.app",
+      "onCheck": "path-exists",
+      "install": "brew install --cask aldente",
+      "group": "brew"
     }
-  },
-  "items": []
+  ]
 }
+```
+
+### Server-Only Services
+
+Server services should live outside the workstation profile. Bind them to a server surface and use tags to select the service slice.
+
+```json
+{
+  "items": [
+    {
+      "name": "orbstack",
+      "profiles": ["macbook", "server-home"],
+      "tags": ["containers"],
+      "check": "/Applications/OrbStack.app",
+      "onCheck": "path-exists",
+      "install": { "source": "brew", "cask": "orbstack" }
+    },
+    {
+      "name": "tailscale",
+      "profiles": ["macbook", "server-home"],
+      "tags": ["networking", "tailscale"],
+      "check": "which tailscale",
+      "install": { "source": "brew", "cask": "tailscale" }
+    },
+    {
+      "name": "continuwuity-matrix-homeserver",
+      "profiles": ["server-home"],
+      "tags": ["server", "matrix", "docker", "tailscale"],
+      "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\" && tailscale serve status 2>/dev/null | grep -q '127.0.0.1:6167'",
+      "install": {
+        "source": "script",
+        "interpreter": "zsh",
+        "cwd": "~/.matrix/continuwuity",
+        "script": "set -euo pipefail\nmkdir -p data secrets\ncat > compose.yml <<'YAML'\nservices:\n  homeserver:\n    image: forgejo.ellis.link/continuwuation/continuwuity:latest\n    ports:\n      - \"127.0.0.1:6167:6167\"\nYAML\ndocker compose up -d\ntailscale serve --bg --yes http://127.0.0.1:6167"
+      },
+      "update": {
+        "source": "script",
+        "interpreter": "zsh",
+        "cwd": "~/.matrix/continuwuity",
+        "script": "set -euo pipefail\ndocker compose pull\ndocker compose up -d"
+      },
+      "dependsOn": ["orbstack", "tailscale"]
+    }
+  ]
+}
+```
+
+```bash
+rig --ci --profile server-home --tags server --dry-run
 ```
 
 ## Advanced Patterns
@@ -641,6 +756,8 @@ Store your config in a repo and pull updates:
   "items": [
     {
       "name": "system-config-repo",
+      "profiles": ["macbook"],
+      "tags": ["config", "git"],
       "check": "~/.system-config",
       "onCheck": "path-exists",
       "install": {
@@ -667,12 +784,16 @@ rig -c ~/.system-config/system-config.json
   "items": [
     {
       "name": "docker",
+      "profiles": ["macbook"],
+      "tags": ["containers", "brew"],
       "check": "docker info > /dev/null 2>&1",
       "install": "brew install --cask docker",
       "group": "brew"
     },
     {
       "name": "postgres",
+      "profiles": ["macbook"],
+      "tags": ["database", "brew"],
       "check": "brew services list | grep postgresql | grep -q started",
       "install": "brew install postgresql@16 && brew services start postgresql@16",
       "group": "brew"
@@ -688,11 +809,15 @@ rig -c ~/.system-config/system-config.json
   "items": [
     {
       "name": "node-correct-version",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "node --version | grep -E '^v(20|22)\\.'",
       "install": "asdf install nodejs 22 && asdf global nodejs 22"
     },
     {
       "name": "pnpm-latest",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
       "check": "pnpm --version | awk -F. '{exit ($1 >= 9) ? 0 : 1}'",
       "install": "npm install -g pnpm@latest"
     }
@@ -707,6 +832,8 @@ rig -c ~/.system-config/system-config.json
   "items": [
     {
       "name": "nvim-plugins",
+      "profiles": ["macbook"],
+      "tags": ["editor", "plugins"],
       "check": "~/.local/share/nvim/lazy",
       "onCheck": "path-exists",
       "install": "nvim --headless '+Lazy! sync' +qa",
@@ -714,6 +841,8 @@ rig -c ~/.system-config/system-config.json
     },
     {
       "name": "tmux-plugins",
+      "profiles": ["macbook"],
+      "tags": ["terminal", "plugins"],
       "check": "~/.tmux/plugins/tpm",
       "onCheck": "path-exists",
       "install": "git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/scripts/install_plugins.sh",
@@ -730,7 +859,7 @@ rig -c ~/.system-config/system-config.json
 Use `--dry-run` to see what would happen without making changes:
 
 ```bash
-rig --dry-run
+rig --ci --profile macbook --dry-run
 ```
 
 ### Check Individual Items
@@ -738,7 +867,7 @@ rig --dry-run
 Test a specific item:
 
 ```bash
-rig --only neovim --dry-run
+rig --ci --profile macbook --only neovim --dry-run
 ```
 
 ### Common Issues
@@ -757,7 +886,14 @@ Prefer the native brew source (`"install": { "source": "brew", ... }`) because i
 If you use string install commands, ensure all brew items have `"group": "brew"`:
 
 ```json
-{ "name": "neovim", "install": "brew install neovim", "group": "brew" }
+{
+  "name": "neovim",
+  "profiles": ["macbook"],
+  "tags": ["brew", "editor"],
+  "check": "which nvim",
+  "install": "brew install neovim",
+  "group": "brew"
+}
 ```
 
 **Path expansion not working**
@@ -778,7 +914,12 @@ Check that `dependsOn` references valid item names:
 ```json
 {
   "name": "nvim-config",
-  "dependsOn": ["neovim"]  // Must match exact "name" of another item
+  "profiles": ["macbook"],
+  "tags": ["editor", "dotfiles"],
+  "check": "~/.config/nvim",
+  "onCheck": "path-exists",
+  "install": { "source": "git", "repo": "https://github.com/username/nvim-config.git", "path": "~/.config/nvim" },
+  "dependsOn": ["neovim"]
 }
 ```
 

@@ -1,13 +1,13 @@
 import { Context, Effect, Layer } from "effect";
 import { GitError, ShellError } from "../errors.js";
-import { ShellService } from "./ShellService.js";
-import type { GitInstall, TimeoutInput } from "../schema/config.js";
+import { ShellService, type ShellExecutionOptions } from "./ShellService.js";
+import type { GitInstall } from "../schema/config.js";
 import { expandPath } from "../utils.js";
 
 export interface GitService {
   readonly clone: (
     install: GitInstall,
-    options?: { timeout?: TimeoutInput },
+    options?: ShellExecutionOptions,
   ) => Effect.Effect<void, GitError, ShellService>;
 }
 
@@ -20,12 +20,18 @@ const mapGitShellError = (install: GitInstall, reason: string, error: ShellError
     command: error.command,
     exitCode: error.exitCode,
     stderr: error.stderr,
+    ...(error.stdout === undefined ? {} : { stdout: error.stdout }),
     ...(error.timedOut === undefined ? {} : { timedOut: error.timedOut }),
     ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
   });
 
-const withCwdAndTimeout = (cwd: string, timeout: TimeoutInput | undefined) =>
-  timeout === undefined ? { cwd } : { cwd, timeout };
+const withCwd = (
+  cwd: string,
+  options: ShellExecutionOptions | undefined,
+): ShellExecutionOptions => ({
+  ...options,
+  cwd,
+});
 
 export const GitServiceLive = Layer.succeed(
   GitService,
@@ -48,7 +54,7 @@ const fullClone = (
   shell: ShellService,
   install: GitInstall,
   targetPath: string,
-  options?: { timeout?: TimeoutInput },
+  options?: ShellExecutionOptions,
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function* () {
     const args = ["clone"];
@@ -70,7 +76,7 @@ const sparseClone = (
   shell: ShellService,
   install: GitInstall,
   targetPath: string,
-  options?: { timeout?: TimeoutInput },
+  options?: ShellExecutionOptions,
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function* () {
     const initArgs = ["clone", "--filter=blob:none", "--no-checkout"];
@@ -88,11 +94,7 @@ const sparseClone = (
       );
 
     yield* shell
-      .exec(
-        "git",
-        ["sparse-checkout", "init", "--cone"],
-        withCwdAndTimeout(targetPath, options?.timeout),
-      )
+      .exec("git", ["sparse-checkout", "init", "--cone"], withCwd(targetPath, options))
       .pipe(
         Effect.mapError((error) =>
           mapGitShellError(install, "Failed to initialize sparse-checkout", error),
@@ -100,11 +102,7 @@ const sparseClone = (
       );
 
     yield* shell
-      .exec(
-        "git",
-        ["sparse-checkout", "set", ...install.sparse!],
-        withCwdAndTimeout(targetPath, options?.timeout),
-      )
+      .exec("git", ["sparse-checkout", "set", ...install.sparse!], withCwd(targetPath, options))
       .pipe(
         Effect.mapError((error) =>
           mapGitShellError(
@@ -116,7 +114,7 @@ const sparseClone = (
       );
 
     yield* shell
-      .exec("git", ["checkout"], withCwdAndTimeout(targetPath, options?.timeout))
+      .exec("git", ["checkout"], withCwd(targetPath, options))
       .pipe(
         Effect.mapError((error) =>
           mapGitShellError(install, "Failed to checkout sparse files", error),

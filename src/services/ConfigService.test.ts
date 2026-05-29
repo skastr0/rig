@@ -433,4 +433,31 @@ describe("ConfigService", () => {
       },
     );
   });
+
+  it("rejects dependencies that are not available on every item profile", async () => {
+    await expectConfigError(
+      loadConfig(
+        { _tag: "local", path: "./system-config.json" },
+        {
+          "./system-config.json": JSON.stringify({
+            items: [
+              configItem("tailscale", "which tailscale", "brew install tailscale"),
+              {
+                ...configItem("matrix-server", "test -f compose.yml", "docker compose up -d"),
+                profiles: ["server-home"],
+                dependsOn: ["tailscale"],
+              },
+            ],
+          }),
+        },
+      ),
+      (error) => {
+        expect(error.message).toContain("Config validation failed:");
+        expect(error.message).toContain(
+          'Item "matrix-server" depends on "tailscale", but "tailscale" is not available in profile(s): server-home.',
+        );
+        expect(error.message).toContain('Add those profiles to "tailscale"');
+      },
+    );
+  });
 });

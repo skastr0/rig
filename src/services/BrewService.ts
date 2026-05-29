@@ -1,12 +1,12 @@
 import { Context, Effect, Layer } from "effect";
 import { BrewError, ShellError } from "../errors.js";
-import { ShellService } from "./ShellService.js";
-import type { BrewInstall, TimeoutInput } from "../schema/config.js";
+import { ShellService, type ShellExecutionOptions } from "./ShellService.js";
+import type { BrewInstall } from "../schema/config.js";
 
 export interface BrewService {
   readonly install: (
     brew: BrewInstall,
-    options?: { timeout?: TimeoutInput },
+    options?: ShellExecutionOptions,
   ) => Effect.Effect<void, BrewError, ShellService>;
 }
 
@@ -19,6 +19,7 @@ const mapBrewShellError = (formulaOrCask: string, reason: string, error: ShellEr
     command: error.command,
     exitCode: error.exitCode,
     stderr: error.stderr,
+    ...(error.stdout === undefined ? {} : { stdout: error.stdout }),
     ...(error.timedOut === undefined ? {} : { timedOut: error.timedOut }),
     ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
   });

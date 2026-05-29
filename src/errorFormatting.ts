@@ -23,9 +23,10 @@ const errorFormatter = <TError>(
 const formatCommandContext = (error: {
   readonly command?: string;
   readonly exitCode?: number;
+  readonly stdout?: string;
   readonly stderr?: string;
 }): string =>
-  `${error.command ? `\n  Command: ${error.command}` : ""}${error.exitCode !== undefined ? `\n  Exit code: ${error.exitCode}` : ""}${error.stderr ? `\n  ${error.stderr}` : ""}`;
+  `${error.command ? `\n  Command: ${error.command}` : ""}${error.exitCode !== undefined ? `\n  Exit code: ${error.exitCode}` : ""}${error.stdout ? `\n  stdout:\n${error.stdout}` : ""}${error.stderr ? `\n  stderr:\n${error.stderr}` : ""}`;
 
 const errorFormatters = [
   errorFormatter(
@@ -43,7 +44,7 @@ const errorFormatters = [
   errorFormatter(
     (error): error is ShellError => error instanceof ShellError,
     (error) =>
-      `Command failed: ${error.command}\n  Exit code: ${error.exitCode}\n  ${error.stderr}`,
+      `Command failed: ${error.command}\n  Exit code: ${error.exitCode}${error.stdout ? `\n  stdout:\n${error.stdout}` : ""}${error.stderr ? `\n  stderr:\n${error.stderr}` : ""}`,
   ),
   errorFormatter(
     (error): error is GitError => error instanceof GitError,
