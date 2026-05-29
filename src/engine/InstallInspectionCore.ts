@@ -3,6 +3,7 @@ import type {
   BrewInstall,
   DirInstall,
   GitInstall,
+  ScriptCommand,
   SkillsInstall,
   SymlinkInstall,
   SystemItem,
@@ -24,6 +25,10 @@ export const isSymlinkInstall = (install: SystemItem["install"]): install is Sym
 
 export const isSkillsInstall = (install: SystemItem["install"]): install is SkillsInstall =>
   typeof install === "object" && install.source === "skills";
+
+export const isScriptCommand = (
+  command: SystemItem["install"] | NonNullable<SystemItem["update"]>,
+): command is ScriptCommand => typeof command === "object" && command.source === "script";
 
 export const formatCommand = (command: string, args: readonly string[] = []): string =>
   args.length > 0 ? `${command} ${args.join(" ")}` : command;

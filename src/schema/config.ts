@@ -69,16 +69,28 @@ export const SkillsInstall = Schema.Struct({
 
 export type SkillsInstall = Schema.Schema.Type<typeof SkillsInstall>;
 
+export const ScriptCommand = Schema.Struct({
+  source: Schema.Literal("script"),
+  interpreter: Schema.String.pipe(Schema.minLength(1)),
+  script: Schema.String.pipe(Schema.minLength(1)),
+  cwd: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+});
+
+export type ScriptCommand = Schema.Schema.Type<typeof ScriptCommand>;
+
 export const InstallStrategy = Schema.Union(
   GitInstall,
   BrewInstall,
   DirInstall,
   SymlinkInstall,
   SkillsInstall,
+  ScriptCommand,
   Schema.String.pipe(Schema.minLength(1)),
 );
 
 export type InstallStrategy = Schema.Schema.Type<typeof InstallStrategy>;
+export const UpdateStrategy = Schema.Union(ScriptCommand, Schema.String.pipe(Schema.minLength(1)));
+export type UpdateStrategy = Schema.Schema.Type<typeof UpdateStrategy>;
 export type TimeoutInput = Schema.Schema.Type<typeof TimeoutInput>;
 
 export const SystemItem = Schema.Struct({
@@ -88,7 +100,7 @@ export const SystemItem = Schema.Struct({
   check: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   onCheck: Schema.optional(Schema.Literal("exit-code", "path-exists")),
   install: InstallStrategy,
-  update: Schema.optional(Schema.String),
+  update: Schema.optional(UpdateStrategy),
   group: Schema.optional(Schema.String),
   dependsOn: Schema.optional(Schema.Array(Schema.String)),
   backup: Schema.optional(Schema.String),
@@ -104,7 +116,7 @@ export const SystemItem = Schema.Struct({
         (item.install.source === "dir" ||
           item.install.source === "symlink" ||
           item.install.source === "skills")) ||
-      "Provide check for shell, brew, and git install sources"
+      "Provide check for shell, brew, git, and script install sources"
     );
   }),
 );

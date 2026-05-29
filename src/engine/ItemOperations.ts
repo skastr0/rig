@@ -2,6 +2,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import type {
   DirInstall,
+  ScriptCommand,
   SymlinkInstall,
   SystemItem,
   TimeoutInput as ItemTimeoutInput,
@@ -24,7 +25,7 @@ const {
   getManagedUpdateDetail,
   getManagedUpdatePreview,
   getManagedUpdatePreviewSteps,
-  getShellUpdatePreview,
+  getUpdatePreview,
   getSkillsAddArgs,
   getSymlinkDisplayTarget,
   getSymlinkLinkPath,
@@ -32,6 +33,7 @@ const {
   isBrewInstall,
   isDirInstall,
   isGitInstall,
+  isScriptCommand,
   isSkillsInstall,
   isSymlinkInstall,
   mapFileSystemError,
@@ -74,6 +76,18 @@ const toTimeoutOptions = (
   timeout: ItemTimeoutInput | undefined,
 ): { timeout: ItemTimeoutInput } | undefined => (timeout === undefined ? undefined : { timeout });
 
+const toScriptExecOptions = (
+  timeout: ItemTimeoutInput | undefined,
+  cwd: string | undefined,
+): { timeout?: ItemTimeoutInput; cwd?: string } | undefined => {
+  const options = {
+    ...(timeout === undefined ? {} : { timeout }),
+    ...(cwd === undefined ? {} : { cwd }),
+  };
+
+  return Object.keys(options).length === 0 ? undefined : options;
+};
+
 const runShellCommand = (
   itemName: string,
   command: string,
@@ -84,6 +98,61 @@ const runShellCommand = (
   shell
     .run(command, toTimeoutOptions(timeout))
     .pipe(Effect.tap((result) => Effect.sync(() => emitCommandOutput(itemName, result, options))));
+
+const scriptFilePrefix = (itemName: string): string =>
+  `rig-${itemName.replace(/[^a-zA-Z0-9_.-]/g, "-")}-`;
+
+const runScriptCommand = (
+  itemName: string,
+  command: ScriptCommand,
+  shell: ShellService,
+  fs: FileSystem.FileSystem,
+  timeout: SystemItem["timeout"],
+  options: ExecutorOptions | undefined,
+): Effect.Effect<ShellResult, ShellError | FileSystemInstallError> => {
+  const scriptContent = command.script.endsWith("\n") ? command.script : `${command.script}\n`;
+  const cwd = command.cwd === undefined ? undefined : normalizeManagedPath(command.cwd);
+
+  const prepareCwd =
+    cwd === undefined
+      ? Effect.void
+      : fs
+          .makeDirectory(cwd, { recursive: true })
+          .pipe(Effect.mapError(mapFileSystemError(cwd, `Failed to prepare script cwd "${cwd}"`)));
+
+  const acquireScriptPath = fs
+    .makeTempFile({ prefix: scriptFilePrefix(itemName), suffix: ".sh" })
+    .pipe(
+      Effect.mapError(
+        mapFileSystemError(itemName, `Failed to create temporary script for "${itemName}"`),
+      ),
+    );
+
+  return Effect.gen(function* () {
+    yield* prepareCwd;
+    return yield* Effect.acquireUseRelease(
+      acquireScriptPath,
+      (scriptPath) =>
+        Effect.gen(function* () {
+          yield* fs
+            .writeFileString(scriptPath, scriptContent)
+            .pipe(
+              Effect.mapError(
+                mapFileSystemError(scriptPath, `Failed to write script "${scriptPath}"`),
+              ),
+            );
+          return yield* shell
+            .exec(command.interpreter, [scriptPath], toScriptExecOptions(timeout, cwd))
+            .pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => emitCommandOutput(itemName, result, options)),
+              ),
+            );
+        }),
+      (scriptPath) => fs.remove(scriptPath).pipe(Effect.catchAll(() => Effect.void)),
+    );
+  });
+};
 
 const checkGenericItem = (
   item: SystemItem,
@@ -213,16 +282,28 @@ const installItem = (
     );
   }
 
+  if (isScriptCommand(item.install)) {
+    return runScriptCommand(item.name, item.install, shell, fs, item.timeout, options).pipe(
+      Effect.asVoid,
+    );
+  }
+
   return runShellCommand(item.name, item.install, shell, item.timeout, options).pipe(Effect.asVoid);
 };
 
 const updateItem = (
   item: SystemItem,
   shell: ShellService,
+  fs: FileSystem.FileSystem,
   options: ExecutorOptions | undefined,
-): Effect.Effect<void, ShellError, never> => {
+): Effect.Effect<void, ShellError | FileSystemInstallError, never> => {
   if (!item.update) {
     return Effect.void;
+  }
+  if (isScriptCommand(item.update)) {
+    return runScriptCommand(item.name, item.update, shell, fs, item.timeout, options).pipe(
+      Effect.asVoid,
+    );
   }
   return runShellCommand(item.name, item.update, shell, item.timeout, options).pipe(Effect.asVoid);
 };
@@ -232,7 +313,7 @@ export const itemExecutionOperations: ItemExecutionOperations = {
   isSymlinkInstall,
   toFileSystemInstallError,
   getSymlinkLinkPath,
-  getShellUpdatePreview,
+  getUpdatePreview,
   getManagedUpdatePreview,
   getManagedUpdateDetail,
   getManagedUpdatePreviewSteps,

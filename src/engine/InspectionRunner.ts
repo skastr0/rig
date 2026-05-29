@@ -13,8 +13,13 @@ import { formatError } from "./ExecutionErrors.js";
 import { checkItem, emitVerbose } from "./ItemOperations.js";
 import { installInspection } from "./InstallInspection.js";
 
-const { getCheckDescription, getExecutionDetail, getManagedUpdateDetail, isSymlinkInstall } =
-  installInspection;
+const {
+  getCheckDescription,
+  getExecutionDetail,
+  getManagedUpdateDetail,
+  getUpdatePreview,
+  isSymlinkInstall,
+} = installInspection;
 
 interface ReadyInspectionResult extends InspectionResult {
   readonly readyForExecution: boolean;
@@ -37,12 +42,14 @@ const toInspectionResult = (
   itemState: ItemCheckResult,
 ): ReadyInspectionResult => {
   if (itemState.type === "installed" && item.update) {
+    const detail = getUpdatePreview(item.update).steps[0];
+
     return {
       name: item.name,
       status: "updateable",
-      detail: item.update,
       reason: "Update command configured for this installed item.",
       readyForExecution: true,
+      ...(detail === undefined ? {} : { detail }),
     };
   }
 

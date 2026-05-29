@@ -41,7 +41,7 @@ export interface ItemExecutionOperations {
   readonly isSymlinkInstall: (install: SystemItem["install"]) => install is SymlinkInstall;
   readonly toFileSystemInstallError: (path: string, reason: string) => FileSystemInstallError;
   readonly getSymlinkLinkPath: (install: SymlinkInstall) => string;
-  readonly getShellUpdatePreview: (command: string) => ExecutionPreview;
+  readonly getUpdatePreview: (command: NonNullable<SystemItem["update"]>) => ExecutionPreview;
   readonly getManagedUpdatePreview: (install: SymlinkInstall) => ExecutionPreview;
   readonly getManagedUpdateDetail: (install: SymlinkInstall) => string;
   readonly getManagedUpdatePreviewSteps: (install: SymlinkInstall) => readonly string[];
@@ -50,8 +50,9 @@ export interface ItemExecutionOperations {
   readonly updateItem: (
     item: SystemItem,
     shell: ShellService,
+    fs: FileSystem.FileSystem,
     options: ExecutorOptions | undefined,
-  ) => Effect.Effect<void, ShellError, never>;
+  ) => Effect.Effect<void, ShellError | FileSystemInstallError, never>;
   readonly updateSymlinkItem: (
     install: SymlinkInstall,
     fs: FileSystem.FileSystem,
@@ -133,14 +134,19 @@ const executeInstalledItem = (
   services: ItemExecutionServices,
   operations: ItemExecutionOperations,
   options: ExecutorOptions | undefined,
-): Effect.Effect<ExecutionResult, ShellError | BackupError, FileSystem.FileSystem> => {
-  if (!(options?.update && item.update)) {
+): Effect.Effect<
+  ExecutionResult,
+  ShellError | BackupError | FileSystemInstallError,
+  FileSystem.FileSystem
+> => {
+  const update = item.update;
+  if (!(options?.update && update)) {
     return reportExecutionResultEffect(makeExecutionResult(item, "installed", "skipped"), options);
   }
 
   if (options?.dryRun) {
     return Effect.sync(() => {
-      const preview = operations.getShellUpdatePreview(item.update!);
+      const preview = operations.getUpdatePreview(update);
       emitPreviewSteps(item, "would update", preview.steps, operations, options);
       return reportExecutionResult(
         makeExecutionResult(item, "installed", "would_update", { preview }),
@@ -151,8 +157,11 @@ const executeInstalledItem = (
 
   return Effect.gen(function* () {
     const backedUp = yield* backupItem(item, services.backup, operations, options);
-    operations.emitVerbose(options, `[${item.name}] update: ${item.update}`);
-    yield* operations.updateItem(item, services.shell, options);
+    operations.emitVerbose(
+      options,
+      `[${item.name}] update: ${operations.getUpdatePreview(update).steps.join(" && ")}`,
+    );
+    yield* operations.updateItem(item, services.shell, services.fs, options);
 
     return reportExecutionResult(
       makeExecutionResult(item, "installed", "updated", backedUpDetail(backedUp)),

@@ -186,6 +186,7 @@ const createMockFileSystem = (
   entries: Readonly<Record<string, MockFsNode>> = {},
 ): SyntheticFileSystem => {
   const state = new Map<string, MockFsNode>();
+  let tempFileCounter = 0;
 
   const ensureParentDirectories = (path: string): void => {
     const parentPath = Path.dirname(path);
@@ -314,6 +315,23 @@ const createMockFileSystem = (
         }
 
         state.delete(normalizedPath);
+      }),
+    writeFileString: (path: string) =>
+      Effect.sync(() => {
+        const normalizedPath = normalizeSyntheticPath(path);
+        ensureParentDirectories(normalizedPath);
+        state.set(normalizedPath, { type: "File" });
+      }),
+    makeTempFile: (options?: { directory?: string; prefix?: string; suffix?: string }) =>
+      Effect.sync(() => {
+        const rawPath = Path.join(
+          options?.directory ?? "/tmp",
+          `${options?.prefix ?? ""}${tempFileCounter++}${options?.suffix ?? ""}`,
+        );
+        const normalizedPath = normalizeSyntheticPath(rawPath);
+        ensureParentDirectories(normalizedPath);
+        state.set(normalizedPath, { type: "File" });
+        return rawPath;
       }),
   } as unknown as SyntheticFileSystem;
 };

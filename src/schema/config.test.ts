@@ -5,6 +5,7 @@ import { renderStarterConfig } from "../starterConfig.js";
 import {
   BrewInstall,
   DirInstall,
+  ScriptCommand,
   SkillsInstall,
   SymlinkInstall,
   SystemConfig,
@@ -13,6 +14,7 @@ import {
 
 const decodeBrewInstall = Schema.decodeUnknown(BrewInstall);
 const decodeDirInstall = Schema.decodeUnknown(DirInstall);
+const decodeScriptCommand = Schema.decodeUnknown(ScriptCommand);
 const decodeSkillsInstall = Schema.decodeUnknown(SkillsInstall);
 const decodeSymlinkInstall = Schema.decodeUnknown(SymlinkInstall);
 const decodeSystemConfig = Schema.decodeUnknown(SystemConfig);
@@ -92,6 +94,47 @@ describe("config schema", () => {
       source: "symlink",
       path: "~/.zshrc",
       target: "~/.dotfiles/.zshrc",
+    });
+  });
+
+  it("accepts multiline script commands", async () => {
+    const parsed = await Effect.runPromise(
+      decodeScriptCommand({
+        source: "script",
+        interpreter: "zsh",
+        cwd: "~/.matrix/continuwuity",
+        script: "set -euo pipefail\ndocker compose up -d",
+      }),
+    );
+
+    expect(parsed).toEqual({
+      source: "script",
+      interpreter: "zsh",
+      cwd: "~/.matrix/continuwuity",
+      script: "set -euo pipefail\ndocker compose up -d",
+    });
+  });
+
+  it("accepts script update commands on checked items", async () => {
+    const parsed = await Effect.runPromise(
+      decodeSystemItem({
+        name: "service",
+        profiles: ["server-home"],
+        tags: ["server"],
+        check: "test -f service.yml",
+        install: "echo install",
+        update: {
+          source: "script",
+          interpreter: "zsh",
+          script: "echo update",
+        },
+      }),
+    );
+
+    expect(parsed.update).toEqual({
+      source: "script",
+      interpreter: "zsh",
+      script: "echo update",
     });
   });
 

@@ -36,6 +36,30 @@ const makeItem = (
   timeout: opts?.timeout,
 });
 
+const makeScriptItem = (
+  name: string,
+  opts?: {
+    check?: string;
+    cwd?: string;
+    script?: string;
+    timeout?: number;
+    update?: SystemItem["update"];
+  },
+): SystemItem => ({
+  name,
+  profiles: ["macbook"],
+  tags: ["test"],
+  check: opts?.check ?? `which ${name}`,
+  install: {
+    source: "script",
+    interpreter: "zsh",
+    script: opts?.script ?? "echo install",
+    ...(opts?.cwd === undefined ? {} : { cwd: opts.cwd }),
+  },
+  ...(opts?.update === undefined ? {} : { update: opts.update }),
+  ...(opts?.timeout === undefined ? {} : { timeout: opts.timeout }),
+});
+
 const makeBrewItem = (
   name: string,
   opts?: {
@@ -147,6 +171,7 @@ const createMockFileSystem = (
   readonly entries: Map<string, MockFsNode>;
 } => {
   const state = new Map<string, MockFsNode>();
+  let tempFileCounter = 0;
 
   const ensureParentDirectories = (path: string): void => {
     const parentPath = Path.dirname(path);
@@ -268,6 +293,23 @@ const createMockFileSystem = (
         }
 
         state.delete(normalizedPath);
+      }),
+    writeFileString: (path: string) =>
+      Effect.sync(() => {
+        const normalizedPath = normalizeTestPath(path);
+        ensureParentDirectories(normalizedPath);
+        state.set(normalizedPath, { type: "File" });
+      }),
+    makeTempFile: (options?: { directory?: string; prefix?: string; suffix?: string }) =>
+      Effect.sync(() => {
+        const rawPath = Path.join(
+          options?.directory ?? "/tmp",
+          `${options?.prefix ?? ""}${tempFileCounter++}${options?.suffix ?? ""}`,
+        );
+        const normalizedPath = normalizeTestPath(rawPath);
+        ensureParentDirectories(normalizedPath);
+        state.set(normalizedPath, { type: "File" });
+        return rawPath;
       }),
   };
 
@@ -1375,6 +1417,115 @@ describe("Executor", () => {
     });
   });
 
+  describe("script install strategy", () => {
+    it("executes multiline scripts through an interpreter file without shell string quoting", async () => {
+      const execCalls: Array<{
+        command: string;
+        args: readonly string[];
+        timeout?: unknown;
+        cwd?: string;
+      }> = [];
+      const fileSystem = createMockFileSystem();
+      const shell: ShellService = {
+        run: (command) =>
+          command.startsWith("which ")
+            ? Effect.fail(new ShellError({ command, exitCode: 1, stderr: "not found" }))
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: (command, args, options) =>
+          Effect.sync(() => {
+            execCalls.push({
+              command,
+              args,
+              timeout: options?.timeout,
+              cwd: options?.cwd,
+            });
+            return { stdout: "script ok", stderr: "", exitCode: 0 };
+          }),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeScriptItem("service", {
+            cwd: "~/Synthetic/service",
+            script: "echo one\necho two",
+            timeout: 12_345,
+          }),
+        ]),
+      );
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, fileSystem),
+        ExecutorLive,
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          name: "service",
+          action: "installed",
+          status: "installed",
+        }),
+      ]);
+      expect(execCalls).toHaveLength(1);
+      expect(execCalls[0]?.command).toBe("zsh");
+      expect(execCalls[0]?.args).toHaveLength(1);
+      expect(execCalls[0]?.args[0]).toContain("rig-service-");
+      expect(execCalls[0]?.args[0]).not.toContain("echo one");
+      expect(execCalls[0]?.cwd).toBe(normalizeTestPath("~/Synthetic/service"));
+      expect(execCalls[0]?.timeout).toBe(12_345);
+      expect(fileSystem.entries.has(normalizeTestPath(execCalls[0]?.args[0] ?? ""))).toBe(false);
+    });
+
+    it("previews script installs without dumping the script body", async () => {
+      const fileSystem = createMockFileSystem();
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeScriptItem("service", {
+            cwd: "~/Synthetic/service",
+            script: "echo secret\necho ready",
+          }),
+        ]),
+      );
+      const verboseMessages: string[] = [];
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            dryRun: true,
+            verbose: true,
+            onVerbose: (message) => verboseMessages.push(message),
+          });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "service",
+          action: "skipped",
+          status: "missing",
+          preview: {
+            label: "structured install (script)",
+            steps: ["run zsh script (2 lines) in ~/Synthetic/service"],
+          },
+        }),
+      );
+      expect(verboseMessages).toContain(
+        "[service] would install: run zsh script (2 lines) in ~/Synthetic/service",
+      );
+      expect(JSON.stringify(results)).not.toContain("secret");
+      expect(verboseMessages.join("\n")).not.toContain("secret");
+    });
+  });
+
   // Update mode tests
   describe("update mode", () => {
     it("should run update command when --update flag is set and item has update field", async () => {
@@ -1392,6 +1543,64 @@ describe("Executor", () => {
       expect(results).toHaveLength(1);
       expect(results[0].action).toBe("updated");
       expect(results[0].name).toBe("a");
+    });
+
+    it("should run script update commands through interpreter files", async () => {
+      const execCalls: Array<{
+        command: string;
+        args: readonly string[];
+        cwd?: string;
+      }> = [];
+      const fileSystem = createMockFileSystem();
+      const shell: ShellService = {
+        run: (command) =>
+          command.startsWith("which ")
+            ? Effect.succeed({ stdout: "/usr/bin/service", stderr: "", exitCode: 0 })
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+        exec: (command, args, options) =>
+          Effect.sync(() => {
+            execCalls.push({ command, args, cwd: options?.cwd });
+            return { stdout: "updated", stderr: "", exitCode: 0 };
+          }),
+      };
+      const items = [
+        makeScriptItem("service", {
+          update: {
+            source: "script",
+            interpreter: "zsh",
+            cwd: "~/Synthetic/service",
+            script: "echo update-secret",
+          },
+        }),
+      ];
+      const plan = await Effect.runPromise(topologicalSort(items));
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, fileSystem),
+        ExecutorLive,
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, { update: true });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          name: "service",
+          action: "updated",
+          status: "installed",
+        }),
+      );
+      expect(execCalls[0]?.command).toBe("zsh");
+      expect(execCalls[0]?.args[0]).toContain("rig-service-");
+      expect(execCalls[0]?.args[0]).not.toContain("update-secret");
+      expect(execCalls[0]?.cwd).toBe(normalizeTestPath("~/Synthetic/service"));
     });
 
     it("should include command and reason when update fails", async () => {

@@ -1,4 +1,4 @@
-import type { BrewInstall, GitInstall, SystemItem } from "../schema/config.js";
+import type { BrewInstall, GitInstall, ScriptCommand, SystemItem } from "../schema/config.js";
 import { expandPath } from "../utils.js";
 import type { ExecutionPreview } from "./Executor.js";
 import { getDirInstallPreviewSteps } from "./DirInspection.js";
@@ -7,6 +7,7 @@ import {
   isBrewInstall,
   isDirInstall,
   isGitInstall,
+  isScriptCommand,
   isSkillsInstall,
   isSymlinkInstall,
   normalizeManagedPath,
@@ -89,6 +90,16 @@ const getGitInstallPreviewSteps = (install: GitInstall): readonly string[] => {
   return [formatCommand("git", cloneArgs)];
 };
 
+const countScriptLines = (script: string): number => script.split(/\r?\n/).length;
+
+const getScriptPreviewStep = (command: ScriptCommand): string => {
+  const lineCount = countScriptLines(command.script);
+  const cwd = command.cwd ? ` in ${command.cwd}` : "";
+  const lineLabel = lineCount === 1 ? "1 line" : `${lineCount} lines`;
+
+  return `run ${command.interpreter} script (${lineLabel})${cwd}`;
+};
+
 const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string[] => {
   if (typeof install === "string") return [install];
   if (isDirInstall(install)) return getDirInstallPreviewSteps(install);
@@ -96,6 +107,7 @@ const getInstallPreviewSteps = (install: SystemItem["install"]): readonly string
   if (isBrewInstall(install)) return getBrewInstallPreviewSteps(install);
   if (isGitInstall(install)) return getGitInstallPreviewSteps(install);
   if (isSkillsInstall(install)) return [getSkillsAddCommand(install)];
+  if (isScriptCommand(install)) return [getScriptPreviewStep(install)];
   return [];
 };
 
@@ -116,3 +128,14 @@ export const getShellUpdatePreview = (command: string): ExecutionPreview => ({
   label: "shell update command",
   steps: [command],
 });
+
+export const getUpdatePreview = (command: NonNullable<SystemItem["update"]>): ExecutionPreview =>
+  typeof command === "string"
+    ? {
+        label: "shell update command",
+        steps: [command],
+      }
+    : {
+        label: "script update command",
+        steps: [getScriptPreviewStep(command)],
+      };
