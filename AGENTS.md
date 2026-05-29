@@ -33,9 +33,10 @@ bun run test      # Runs all tests
 **BUILD SUCCESS ≠ WORK COMPLETE**
 
 The build can succeed while:
+
 - TypeScript has type errors
 - Tests are failing
-- Code has linting issues  
+- Code has linting issues
 - Formatting is incorrect
 - Runtime bugs exist
 

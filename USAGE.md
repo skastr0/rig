@@ -81,11 +81,46 @@ For standalone tools with no dependencies:
 ```json
 {
   "items": [
-    { "name": "ripgrep", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which rg", "install": "brew install ripgrep", "group": "brew" },
-    { "name": "fd", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which fd", "install": "brew install fd", "group": "brew" },
-    { "name": "bat", "profiles": ["macbook"], "tags": ["brew", "dev"], "check": "which bat", "install": "brew install bat", "group": "brew" },
-    { "name": "eza", "profiles": ["macbook"], "tags": ["brew", "shell"], "check": "which eza", "install": "brew install eza", "group": "brew" },
-    { "name": "zoxide", "profiles": ["macbook"], "tags": ["brew", "shell"], "check": "which zoxide", "install": "brew install zoxide", "group": "brew" }
+    {
+      "name": "ripgrep",
+      "profiles": ["macbook"],
+      "tags": ["brew", "dev"],
+      "check": "which rg",
+      "install": "brew install ripgrep",
+      "group": "brew"
+    },
+    {
+      "name": "fd",
+      "profiles": ["macbook"],
+      "tags": ["brew", "dev"],
+      "check": "which fd",
+      "install": "brew install fd",
+      "group": "brew"
+    },
+    {
+      "name": "bat",
+      "profiles": ["macbook"],
+      "tags": ["brew", "dev"],
+      "check": "which bat",
+      "install": "brew install bat",
+      "group": "brew"
+    },
+    {
+      "name": "eza",
+      "profiles": ["macbook"],
+      "tags": ["brew", "shell"],
+      "check": "which eza",
+      "install": "brew install eza",
+      "group": "brew"
+    },
+    {
+      "name": "zoxide",
+      "profiles": ["macbook"],
+      "tags": ["brew", "shell"],
+      "check": "which zoxide",
+      "install": "brew install zoxide",
+      "group": "brew"
+    }
   ]
 }
 ```
@@ -163,11 +198,41 @@ Profiles are topology surfaces, such as `macbook`, `workstation`, or `server-hom
 ```json
 {
   "items": [
-    { "name": "neovim", "profiles": ["macbook"], "check": "which nvim", "install": "...", "tags": ["editor", "essential"] },
-    { "name": "emacs", "profiles": ["macbook"], "check": "which emacs", "install": "...", "tags": ["editor"] },
-    { "name": "vscode", "profiles": ["macbook"], "check": "which code", "install": "...", "tags": ["editor", "gui"] },
-    { "name": "docker", "profiles": ["macbook", "server-home"], "check": "which docker", "install": "...", "tags": ["devops"] },
-    { "name": "kubectl", "profiles": ["macbook"], "check": "which kubectl", "install": "...", "tags": ["devops", "k8s"] }
+    {
+      "name": "neovim",
+      "profiles": ["macbook"],
+      "check": "which nvim",
+      "install": "...",
+      "tags": ["editor", "essential"]
+    },
+    {
+      "name": "emacs",
+      "profiles": ["macbook"],
+      "check": "which emacs",
+      "install": "...",
+      "tags": ["editor"]
+    },
+    {
+      "name": "vscode",
+      "profiles": ["macbook"],
+      "check": "which code",
+      "install": "...",
+      "tags": ["editor", "gui"]
+    },
+    {
+      "name": "docker",
+      "profiles": ["macbook", "server-home"],
+      "check": "which docker",
+      "install": "...",
+      "tags": ["devops"]
+    },
+    {
+      "name": "kubectl",
+      "profiles": ["macbook"],
+      "check": "which kubectl",
+      "install": "...",
+      "tags": ["devops", "k8s"]
+    }
   ]
 }
 ```
@@ -875,6 +940,7 @@ rig --ci --profile macbook --only neovim --dry-run
 **"Command not found" after install**
 
 The shell may need to reload. Either:
+
 - Start a new shell session
 - Source your shell config: `source ~/.zshrc`
 - Use absolute paths in subsequent items
@@ -918,7 +984,11 @@ Check that `dependsOn` references valid item names:
   "tags": ["editor", "dotfiles"],
   "check": "~/.config/nvim",
   "onCheck": "path-exists",
-  "install": { "source": "git", "repo": "https://github.com/username/nvim-config.git", "path": "~/.config/nvim" },
+  "install": {
+    "source": "git",
+    "repo": "https://github.com/username/nvim-config.git",
+    "path": "~/.config/nvim"
+  },
   "dependsOn": ["neovim"]
 }
 ```

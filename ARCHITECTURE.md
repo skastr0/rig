@@ -19,25 +19,34 @@ A declarative, idempotent macOS system configuration tool built with Effect and 
 **Decision**: Use a single generic `SystemItem` schema where users define their own `check`, optional `update`, and either a shell install command or a small set of structured install sources.
 
 **Rationale**:
+
 - Removes coupling to specific package managers
 - Users can define any installation method
 - Simpler codebase (no handler registry)
 - More flexible for edge cases
 
 **Structure**:
+
 ```typescript
 type SystemItem = {
-  name: string              // Unique identifier
-  profiles: string[]        // Topology surfaces where the item is eligible
-  tags: string[]            // Technology/workflow slices for filtering
-  check?: string            // Command or path to verify installation; optional for managed sources
-  onCheck?: "exit-code" | "path-exists"  // Detection strategy
-  install: string | BrewInstall | GitInstall | DirInstall | SymlinkInstall | SkillsInstall | ScriptCommand
-  update?: string | ScriptCommand  // Optional update command
-  group?: string            // Serial execution group
-  dependsOn?: string[]      // Dependency ordering
-  backup?: string           // Path to backup before install
-}
+  name: string; // Unique identifier
+  profiles: string[]; // Topology surfaces where the item is eligible
+  tags: string[]; // Technology/workflow slices for filtering
+  check?: string; // Command or path to verify installation; optional for managed sources
+  onCheck?: "exit-code" | "path-exists"; // Detection strategy
+  install:
+    | string
+    | BrewInstall
+    | GitInstall
+    | DirInstall
+    | SymlinkInstall
+    | SkillsInstall
+    | ScriptCommand;
+  update?: string | ScriptCommand; // Optional update command
+  group?: string; // Serial execution group
+  dependsOn?: string[]; // Dependency ordering
+  backup?: string; // Path to backup before install
+};
 ```
 
 ### ADR-002: Install Strategy Discriminated Union
@@ -45,6 +54,7 @@ type SystemItem = {
 **Context**: Most items install via shell command, but a few high-frequency cases need structured handling for clarity and safer defaults.
 
 **Decision**: `install` is a union of:
+
 - `string` for shell commands (escape hatch)
 - `{ source: "brew", ... }` for Homebrew installs
 - `{ source: "git", ... }` for clones and sparse checkouts
@@ -54,6 +64,7 @@ type SystemItem = {
 - `{ source: "script", interpreter, script, cwd? }` for multiline scripts without fragile shell quoting
 
 **Rationale**:
+
 - Shell commands still cover edge cases
 - Brew installs need safe serialization and clearer config
 - Git clones need structured handling for sparse checkout, branch selection, and path expansion
@@ -69,18 +80,40 @@ type SystemItem = {
 **Decision**: Items with the same `group` field run serially; different groups run in parallel.
 
 **Rationale**:
+
 - No hardcoded knowledge of brew/asdf internals
 - User controls concurrency via config
 - Implemented via per-group Semaphore with permits=1
 - Items without `group` run fully parallel
 
 **Example**:
+
 ```json
 {
   "items": [
-    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "check": "which nvim", "group": "brew", "install": "brew install neovim" },
-    { "name": "zellij", "profiles": ["macbook"], "tags": ["brew", "terminal"], "check": "which zellij", "group": "brew", "install": "brew install zellij" },
-    { "name": "nodejs", "profiles": ["macbook"], "tags": ["runtime", "node"], "check": "which node", "install": "asdf install nodejs 22" }
+    {
+      "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["brew", "editor"],
+      "check": "which nvim",
+      "group": "brew",
+      "install": "brew install neovim"
+    },
+    {
+      "name": "zellij",
+      "profiles": ["macbook"],
+      "tags": ["brew", "terminal"],
+      "check": "which zellij",
+      "group": "brew",
+      "install": "brew install zellij"
+    },
+    {
+      "name": "nodejs",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
+      "check": "which node",
+      "install": "asdf install nodejs 22"
+    }
   ]
 }
 ```
@@ -90,12 +123,14 @@ type SystemItem = {
 **Context**: Need to determine if an item is already installed to achieve idempotency.
 
 **Decision**: Each item has a `check` field. Based on `onCheck`:
+
 - `exit-code` (default): Run command; exit 0 = installed
 - `path-exists`: Check if path exists
 
 Structured `dir`, `symlink`, and `skills` install sources also perform install-specific filesystem checks so they can detect conflicts, symlink drift, and already-installed agent skills explicitly.
 
 **Rationale**:
+
 - User controls detection logic
 - Works for any tool (no built-in detection code)
 - Simple and predictable
@@ -106,11 +141,13 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 **Context**: The tool needs concurrent execution, dependency injection, error handling, and schema validation.
 
 **Decision**: Use Effect ecosystem:
+
 - `effect` - Core effects, Semaphore, Schema
 - `@effect/cli` - CLI parsing
 - `@effect/platform-bun` - Bun runtime integration
 
 **Rationale**:
+
 - Type-safe concurrency (Semaphore, Effect.forEach)
 - Dependency injection via Layers
 - Schema validation with detailed errors
@@ -122,12 +159,14 @@ Structured `dir`, `symlink`, and `skills` install sources also perform install-s
 **Context**: Different machines and environments need different topology surfaces, while operators also need technology slices such as `brew`, `runtime`, `server`, or `editor` that can cut across those surfaces.
 
 **Decision**: Each item declares both:
+
 - `profiles`: the surfaces where the item is eligible, such as `macbook`, `work`, `personal`, or `server-home`
 - `tags`: the technology/workflow slices the item belongs to, such as `brew`, `node`, `matrix`, or `containers`
 
 Bare `rig` is interactive when attached to a TTY: the TUI asks for a profile, optional tag filters, and execution options. Headless usage fails closed and requires `--ci --profile <name>`.
 
 **Structure**:
+
 ```json
 {
   "items": [
@@ -150,6 +189,7 @@ Bare `rig` is interactive when attached to a TTY: the TUI asks for a profile, op
 ```
 
 **Resolution**:
+
 1. Load and validate all declared items
 2. Collect available profiles and tags from item metadata
 3. Select direct items matching the requested profile and tag filters
@@ -161,11 +201,13 @@ Bare `rig` is interactive when attached to a TTY: the TUI asks for a profile, op
 **Context**: Dotfiles/configs may have local changes that shouldn't be lost.
 
 **Decision**: Items can specify `backup` path. Before install, the tool:
+
 1. Creates timestamped backup dir (e.g., `~/.rig-backups/2024-01-15T10-30-00/`)
 2. Copies existing file/directory to backup
 3. Proceeds with install
 
 **Rationale**:
+
 - Non-destructive by default
 - User can recover if needed
 - Timestamp prevents overwriting backups

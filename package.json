@@ -1,7 +1,47 @@
 {
   "name": "@skastr0/rig",
   "version": "0.1.0",
+  "description": "Declarative, idempotent system configuration CLI for macOS and Linux.",
+  "keywords": [
+    "bun",
+    "cli",
+    "dotfiles",
+    "effect",
+    "linux",
+    "macos",
+    "rig",
+    "system-configuration"
+  ],
+  "homepage": "https://github.com/skastr0/rig#readme",
+  "bugs": {
+    "url": "https://github.com/skastr0/rig/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skastr0/rig.git"
+  },
+  "bin": {
+    "rig": "src/index.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/test/**",
+    "scripts/build.ts",
+    "scripts/compile.ts",
+    "scripts/install.ts",
+    "README.md",
+    "USAGE.md",
+    "ARCHITECTURE.md",
+    "GUIDELINES.md",
+    "example-config.json",
+    "favicon.svg"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun scripts/build.ts",
@@ -11,28 +51,37 @@
     "lint": "oxlint .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "validate": "bun run typecheck && bun run lint && bun run format:check"
+    "validate": "bun run typecheck && bun run lint && bun run format:check",
+    "verify": "bun run validate && bun run test && bun run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "release:check": "bun run verify && bun run pack:dry-run && bun audit && publish-scan ."
   },
   "dependencies": {
-    "@effect/cli": "^0.72.1",
-    "@effect/platform": "^0.93.6",
-    "@effect/platform-bun": "^0.86.0",
+    "@effect/cli": "^0.75.1",
+    "@effect/platform": "^0.96.1",
+    "@effect/platform-bun": "^0.89.0",
     "@opentui/core": "^0.3.0",
     "@opentui/react": "^0.3.0",
-    "effect": "3.21.0",
+    "effect": "^3.21.2",
     "react": "^19.2.6"
   },
-  "overrides": {
-    "effect": "3.21.0"
-  },
   "devDependencies": {
-    "@effect/vitest": "^0.16.3",
+    "@effect/vitest": "^0.29.0",
     "@skastr0/pulsar-project-module-effect": "0.1.1",
     "@types/react": "^19.2.15",
-    "bun-types": "^1.3.4",
-    "oxfmt": "latest",
-    "oxlint": "^1.28.0",
+    "bun-types": "^1.3.14",
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "picomatch": "2.3.2",
+    "uuid": "11.1.1",
+    "ws": "8.20.1",
+    "yaml": "2.8.3"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
   }
 }

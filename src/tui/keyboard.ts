@@ -61,21 +61,22 @@ const handleFilterKey = (
     return false;
   }
 
-  const filterActions: Record<string, () => void> = {
-    escape: actions.clearFilter,
-    enter: actions.finishFilter,
-    backspace: () => {
+  switch (name) {
+    case "escape":
+      actions.clearFilter();
+      return true;
+    case "enter":
+      actions.finishFilter();
+      return true;
+    case "backspace":
       if (state.filterQuery.length > 0) {
         actions.deleteFilter();
       } else {
         actions.finishFilter();
       }
-    },
-  };
-  const filterAction = filterActions[name];
-  if (filterAction) {
-    filterAction();
-    return true;
+      return true;
+    default:
+      break;
   }
 
   if (isPrintableFilterCharacter(name, key.ctrl)) {
@@ -124,15 +125,18 @@ const handleOptionKey = (
   state: RigKeyboardState,
   actions: RigKeyboardActions,
 ): boolean => {
-  const unconditionalActions: Record<string, () => void> = {
-    v: actions.toggleVerbose,
-    b: actions.back,
-    space: actions.toggleTag,
-  };
-  const unconditionalAction = unconditionalActions[name];
-  if (unconditionalAction) {
-    unconditionalAction();
-    return true;
+  switch (name) {
+    case "v":
+      actions.toggleVerbose();
+      return true;
+    case "b":
+      actions.back();
+      return true;
+    case "space":
+      actions.toggleTag();
+      return true;
+    default:
+      break;
   }
 
   if (name === "u" && !state.running) {
@@ -148,11 +152,16 @@ const handleRunKey = (name: string, state: RigKeyboardState, actions: RigKeyboar
     return;
   }
 
-  const runActions: Record<string, () => void> = {
-    p: actions.preview,
-    r: actions.run,
-  };
-  runActions[name]?.();
+  switch (name) {
+    case "p":
+      actions.preview();
+      break;
+    case "r":
+      actions.run();
+      break;
+    default:
+      break;
+  }
 };
 
 export const handleRigKey = (

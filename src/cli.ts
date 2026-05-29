@@ -17,7 +17,7 @@ export interface CliOptions {
   readonly update: boolean;
 }
 
-const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@<40-char-commit>][/path/to/config.json]; remote sources can append #sha256=<digest>; bare repos default to ${defaultGitHubConfigPath})`;
+const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@40-char-commit][/path/to/config.json]; remote sources can append #sha256=digest; bare repos default to ${defaultGitHubConfigPath})`;
 
 const source = Args.text({ name: "config-source" }).pipe(
   Args.optional,

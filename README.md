@@ -4,6 +4,10 @@ A declarative, idempotent macOS/Linux system configuration tool built with Effec
 
 Define your system configuration in JSON, and `rig` will install only what's missing. Bare `rig` opens an interactive terminal UI; headless automation uses `--ci --profile <name>`.
 
+## Status
+
+Experimental. rig is useful for local system-configuration workflows, but the CLI behavior, configuration schema, install-source set, TUI behavior, package surface, and release channels may change while the project is in `0.y.z`.
+
 ## Quick Start
 
 ```bash
@@ -61,13 +65,23 @@ rig --ci --profile macbook --apply gh:user/repo
 Requires [Bun](https://bun.sh) 1.0+.
 
 ```bash
-git clone https://github.com/USER/rig.git
+git clone https://github.com/skastr0/rig.git
 cd rig
 bun install
 bun run install:local
 ```
 
 `install:local` compiles a binary for your host platform straight into `~/.local/bin/rig` (and ad-hoc codesigns it on macOS). No separate build step needed.
+
+### npm Package
+
+The planned npm package is `@skastr0/rig`, a Bun-native CLI package. It is not published yet.
+
+After the first npm release:
+
+```bash
+bunx @skastr0/rig --help
+```
 
 ### Building Distribution Binaries
 
@@ -79,6 +93,8 @@ bun run build
 ```
 
 Use this when you want to upload binaries to a release or copy them to another machine. The extra install command pulls OpenTUI's optional native packages for every target. For installing on the current machine, prefer `bun run install:local`.
+
+Do not publish packages, create release tags, dispatch release workflows, or flip repository visibility until the gates in `docs/publishing.md` have been completed.
 
 ## Configuration
 
@@ -137,6 +153,7 @@ Integrity mismatches fail closed and report both the expected and observed SHA-2
 Local configs keep the existing contract: apply by default, preview with `--dry-run`.
 
 Remote configs are review-first:
+
 - `rig https://example.com/system-config.json` opens the interactive TUI in review mode
 - `rig gh:owner/repo` does the same after resolving to the repo root `system-config.json` on GitHub
 - headless remote runs require `--ci --profile <name>` and preview by default
@@ -182,28 +199,30 @@ rig --ci --profile macbook --apply gh:owner/repo/path/to/config.json
 
 ### Item Fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Unique identifier for the item |
-| `profiles` | Yes | Topology surfaces where this item belongs, such as `"macbook"` or `"server-home"` |
-| `tags` | Yes | Technology or workflow slices used for filtering, such as `"brew"`, `"editor"`, or `"server"` |
-| `check` | Usually | Command or path to verify installation; optional for managed `dir`, `symlink`, and `skills` sources |
-| `install` | Yes | Shell command or structured install source |
-| `onCheck` | No | Detection strategy: `"exit-code"` (default) or `"path-exists"` |
-| `update` | No | Command to update the item; `symlink` sources also use `--update` to replace incorrect existing paths |
-| `group` | No | Serial execution group (items in same group run sequentially) |
-| `dependsOn` | No | Array of item names that must be installed first |
-| `timeout` | No | Per-item timeout in milliseconds for checks, installs, and updates |
-| `backup` | No | Path to backup before installing |
+| Field       | Required | Description                                                                                           |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `name`      | Yes      | Unique identifier for the item                                                                        |
+| `profiles`  | Yes      | Topology surfaces where this item belongs, such as `"macbook"` or `"server-home"`                     |
+| `tags`      | Yes      | Technology or workflow slices used for filtering, such as `"brew"`, `"editor"`, or `"server"`         |
+| `check`     | Usually  | Command or path to verify installation; optional for managed `dir`, `symlink`, and `skills` sources   |
+| `install`   | Yes      | Shell command or structured install source                                                            |
+| `onCheck`   | No       | Detection strategy: `"exit-code"` (default) or `"path-exists"`                                        |
+| `update`    | No       | Command to update the item; `symlink` sources also use `--update` to replace incorrect existing paths |
+| `group`     | No       | Serial execution group (items in same group run sequentially)                                         |
+| `dependsOn` | No       | Array of item names that must be installed first                                                      |
+| `timeout`   | No       | Per-item timeout in milliseconds for checks, installs, and updates                                    |
+| `backup`    | No       | Path to backup before installing                                                                      |
 
 ### Check Strategies
 
 **exit-code** (default): Run command, exit 0 = installed
+
 ```json
 { "check": "which nvim", "onCheck": "exit-code" }
 ```
 
 **path-exists**: Check if path exists
+
 ```json
 { "check": "~/.config/nvim", "onCheck": "path-exists" }
 ```
@@ -211,6 +230,7 @@ rig --ci --profile macbook --apply gh:owner/repo/path/to/config.json
 ### Install Strategies
 
 **Directory (preferred for managed directories)**:
+
 ```json
 {
   "name": "projects-root",
@@ -226,6 +246,7 @@ rig --ci --profile macbook --apply gh:owner/repo/path/to/config.json
 ```
 
 **Symlink (preferred for managed links)**:
+
 ```json
 {
   "name": "zshrc",
@@ -245,6 +266,7 @@ rig --ci --profile macbook --apply gh:owner/repo/path/to/config.json
 For `symlink` items, `--update` means: if `install.path` already exists but is not the desired symlink, rig replaces that existing path with the configured symlink. If `backup` is set, that path is backed up before replacement.
 
 **Brew source (preferred for Homebrew)**:
+
 ```json
 {
   "name": "neovim",
@@ -273,6 +295,7 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 ```
 
 **Git clone**:
+
 ```json
 {
   "name": "dotfiles",
@@ -291,6 +314,7 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 ```
 
 **Skills source (preferred for agent skills)**:
+
 ```json
 {
   "name": "agent-skills",
@@ -312,6 +336,7 @@ For `symlink` items, `--update` means: if `install.path` already exists but is n
 For `skills` items, `check` can be omitted. `rig` derives global skill paths for supported agents, such as `~/.codex/skills/<skill>/SKILL.md` for Codex and `~/.config/opencode/skills/<skill>/SKILL.md` for OpenCode. Skills installs run through `env DISABLE_TELEMETRY=1 npx --yes <package> add ... --global --yes`, repeat `--skill` and `--agent` for every configured value, and default to the serial `skills` group unless you set `group` yourself. `mode` defaults to `copy`; set `"mode": "symlink"` to omit the CLI's `--copy` flag.
 
 **Shell command (escape hatch)**:
+
 ```json
 {
   "name": "neovim",
@@ -323,6 +348,7 @@ For `skills` items, `check` can be omitted. `rig` derives global skill paths for
 ```
 
 **Script command (preferred for multi-line service installers)**:
+
 ```json
 {
   "name": "continuwuity-matrix-homeserver",
@@ -347,9 +373,29 @@ Items with the same `group` run sequentially. Use this for package managers that
 ```json
 {
   "items": [
-    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "group": "brew", "check": "which nvim", "install": "brew install neovim" },
-    { "name": "ripgrep", "profiles": ["macbook"], "tags": ["brew", "dev"], "group": "brew", "check": "which rg", "install": "brew install ripgrep" },
-    { "name": "nodejs", "profiles": ["macbook"], "tags": ["runtime", "node"], "check": "which node", "install": "asdf install nodejs 22" }
+    {
+      "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["brew", "editor"],
+      "group": "brew",
+      "check": "which nvim",
+      "install": "brew install neovim"
+    },
+    {
+      "name": "ripgrep",
+      "profiles": ["macbook"],
+      "tags": ["brew", "dev"],
+      "group": "brew",
+      "check": "which rg",
+      "install": "brew install ripgrep"
+    },
+    {
+      "name": "nodejs",
+      "profiles": ["macbook"],
+      "tags": ["runtime", "node"],
+      "check": "which node",
+      "install": "asdf install nodejs 22"
+    }
   ]
 }
 ```
@@ -361,8 +407,21 @@ Here, neovim and ripgrep run sequentially (same group), while nodejs runs in par
 ```json
 {
   "items": [
-    { "name": "homebrew", "profiles": ["macbook"], "tags": ["brew", "bootstrap"], "check": "which brew", "install": "/bin/bash -c \"$(curl -fsSL ...)\"" },
-    { "name": "neovim", "profiles": ["macbook"], "tags": ["brew", "editor"], "check": "which nvim", "install": "brew install neovim", "dependsOn": ["homebrew"] }
+    {
+      "name": "homebrew",
+      "profiles": ["macbook"],
+      "tags": ["brew", "bootstrap"],
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL ...)\""
+    },
+    {
+      "name": "neovim",
+      "profiles": ["macbook"],
+      "tags": ["brew", "editor"],
+      "check": "which nvim",
+      "install": "brew install neovim",
+      "dependsOn": ["homebrew"]
+    }
   ]
 }
 ```
@@ -428,7 +487,11 @@ Automatically backup files before overwriting:
   "tags": ["editor", "dotfiles"],
   "check": "~/.config/nvim",
   "onCheck": "path-exists",
-  "install": { "source": "git", "repo": "https://github.com/username/nvim-config.git", "path": "~/.config/nvim" },
+  "install": {
+    "source": "git",
+    "repo": "https://github.com/username/nvim-config.git",
+    "path": "~/.config/nvim"
+  },
   "backup": "~/.config/nvim"
 }
 ```
@@ -442,8 +505,20 @@ Filter items by tags:
 ```json
 {
   "items": [
-    { "name": "neovim", "profiles": ["macbook"], "check": "which nvim", "install": "...", "tags": ["editor", "dev"] },
-    { "name": "slack", "profiles": ["macbook"], "check": "which slack", "install": "...", "tags": ["communication"] }
+    {
+      "name": "neovim",
+      "profiles": ["macbook"],
+      "check": "which nvim",
+      "install": "...",
+      "tags": ["editor", "dev"]
+    },
+    {
+      "name": "slack",
+      "profiles": ["macbook"],
+      "check": "which slack",
+      "install": "...",
+      "tags": ["communication"]
+    }
   ]
 }
 ```

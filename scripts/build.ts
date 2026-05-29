@@ -26,14 +26,14 @@ for (const target of targets) {
   const outfile = join(distDir, `rig-${target.platform}-${target.arch}`);
   const targetLabel = `${target.platform}-${target.arch}`;
 
-  console.log(`Building ${target.platform}-${target.arch}...`);
+  console.log("Building %s-%s...", target.platform, target.arch);
   try {
     await compile(target, outfile);
     const { stdout } = await Bun.$`du -h ${outfile}`.quiet();
     console.log(`  ${outfile} (${stdout.toString().split("\t")[0]})`);
   } catch (error) {
     failedTargets.push(targetLabel);
-    console.error(`  Error building ${targetLabel}:`, error);
+    console.error("  Error building %s:", targetLabel, error);
   }
 }
 
