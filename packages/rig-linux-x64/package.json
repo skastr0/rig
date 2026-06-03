@@ -1,0 +1,24 @@
+{
+  "name": "@skastr0/rig-linux-x64",
+  "version": "0.1.0",
+  "description": "Prebuilt rig CLI binary for Linux x64.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skastr0/rig.git",
+    "directory": "packages/rig-linux-x64"
+  },
+  "files": [
+    "bin/rig",
+    "README.md"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

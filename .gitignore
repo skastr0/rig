@@ -1,7 +1,13 @@
 node_modules/
 dist/
+packages/*/bin/rig
 *.log
 .DS_Store
+.env
+.env.*
+!.env.example
+release.md
+system-config.*.json
 beads-issues-backup-*.jsonl
 temp_git_research/
 .cmap/

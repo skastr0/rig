@@ -62,7 +62,7 @@ rig --ci --profile macbook --apply gh:user/repo
 
 ### From Source
 
-Requires [Bun](https://bun.sh) 1.0+.
+Requires [Bun](https://bun.sh) 1.3.0+.
 
 ```bash
 git clone https://github.com/skastr0/rig.git
@@ -75,17 +75,20 @@ bun run install:local
 
 ### npm Package
 
-The planned npm package is `@skastr0/rig`, a Bun-native CLI package. It is not published yet.
+The planned npm package is `@skastr0/rig`. It is not published yet.
+The package installs a small Node launcher plus a platform-specific prebuilt binary, so users do not need Bun installed to run rig from npm package runners.
 
 After the first npm release:
 
 ```bash
+npx @skastr0/rig --help
 bunx @skastr0/rig --help
+pnpm dlx @skastr0/rig --help
 ```
 
 ### Building Distribution Binaries
 
-To produce binaries for all four supported platforms (`darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`) under `dist/`:
+To produce binaries for all four supported platforms (`darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`) under `dist/` and the npm platform packages:
 
 ```bash
 bun install --cpu='*' --os='*'
@@ -347,24 +350,25 @@ For `skills` items, `check` can be omitted. `rig` derives global skill paths for
 }
 ```
 
-**Script command (preferred for multi-line service installers)**:
+**Script command (preferred for multi-line setup)**:
 
 ```json
 {
-  "name": "continuwuity-matrix-homeserver",
+  "name": "workspace-marker",
   "profiles": ["server-home"],
-  "tags": ["server", "matrix", "docker"],
-  "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\"",
+  "tags": ["server", "bootstrap"],
+  "check": "~/.local/share/rig/server-home",
+  "onCheck": "path-exists",
   "install": {
     "source": "script",
     "interpreter": "zsh",
-    "cwd": "~/.matrix/continuwuity",
-    "script": "set -euo pipefail\nmkdir -p data\ndocker compose up -d"
+    "cwd": "~/.local/share",
+    "script": "set -euo pipefail\nmkdir -p rig/server-home\nprintf 'managed by rig\\n' > rig/server-home/README.txt"
   }
 }
 ```
 
-Script commands are written to a temporary file and executed as `interpreter <tempfile>`, so complex Docker or service setup does not need fragile nested shell quoting.
+Script commands are written to a temporary file and executed as `interpreter <tempfile>`, so multi-step setup does not need fragile nested shell quoting.
 
 ### Groups (Serial Execution)
 
@@ -536,27 +540,17 @@ Put services that should never install on a daily workstation in a server profil
 
 ```json
 {
-  "name": "continuwuity-matrix-homeserver",
+  "name": "caddy",
   "profiles": ["server-home"],
-  "tags": ["server", "matrix", "docker", "tailscale"],
-  "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\" && tailscale serve status 2>/dev/null | grep -q '127.0.0.1:6167'",
-  "install": {
-    "source": "script",
-    "interpreter": "zsh",
-    "cwd": "~/.matrix/continuwuity",
-    "script": "set -euo pipefail\nmkdir -p data secrets\ncat > compose.yml <<'YAML'\nservices:\n  homeserver:\n    image: forgejo.ellis.link/continuwuation/continuwuity:latest\n    ports:\n      - \"127.0.0.1:6167:6167\"\nYAML\ndocker compose up -d\ntailscale serve --bg --yes http://127.0.0.1:6167"
-  },
-  "update": {
-    "source": "script",
-    "interpreter": "zsh",
-    "cwd": "~/.matrix/continuwuity",
-    "script": "set -euo pipefail\ndocker compose pull\ndocker compose up -d"
-  },
-  "dependsOn": ["orbstack", "tailscale"]
+  "tags": ["server", "web"],
+  "check": "which caddy",
+  "install": { "source": "brew", "formula": "caddy" },
+  "group": "brew",
+  "dependsOn": ["homebrew"]
 }
 ```
 
-Any dependencies, such as `orbstack` or `tailscale` above, must also include `server-home` in their own `profiles` arrays.
+Any dependencies, such as `homebrew` above, must also include `server-home` in their own `profiles` arrays.
 
 ```bash
 rig --ci --profile server-home --tags server --dry-run

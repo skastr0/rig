@@ -769,38 +769,20 @@ Server services should live outside the workstation profile. Bind them to a serv
 {
   "items": [
     {
-      "name": "orbstack",
+      "name": "homebrew",
       "profiles": ["macbook", "server-home"],
-      "tags": ["containers"],
-      "check": "/Applications/OrbStack.app",
-      "onCheck": "path-exists",
-      "install": { "source": "brew", "cask": "orbstack" }
+      "tags": ["brew", "bootstrap"],
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     },
     {
-      "name": "tailscale",
-      "profiles": ["macbook", "server-home"],
-      "tags": ["networking", "tailscale"],
-      "check": "which tailscale",
-      "install": { "source": "brew", "cask": "tailscale" }
-    },
-    {
-      "name": "continuwuity-matrix-homeserver",
+      "name": "caddy",
       "profiles": ["server-home"],
-      "tags": ["server", "matrix", "docker", "tailscale"],
-      "check": "test -f \"$HOME/.matrix/continuwuity/compose.yml\" && tailscale serve status 2>/dev/null | grep -q '127.0.0.1:6167'",
-      "install": {
-        "source": "script",
-        "interpreter": "zsh",
-        "cwd": "~/.matrix/continuwuity",
-        "script": "set -euo pipefail\nmkdir -p data secrets\ncat > compose.yml <<'YAML'\nservices:\n  homeserver:\n    image: forgejo.ellis.link/continuwuation/continuwuity:latest\n    ports:\n      - \"127.0.0.1:6167:6167\"\nYAML\ndocker compose up -d\ntailscale serve --bg --yes http://127.0.0.1:6167"
-      },
-      "update": {
-        "source": "script",
-        "interpreter": "zsh",
-        "cwd": "~/.matrix/continuwuity",
-        "script": "set -euo pipefail\ndocker compose pull\ndocker compose up -d"
-      },
-      "dependsOn": ["orbstack", "tailscale"]
+      "tags": ["server", "web"],
+      "check": "which caddy",
+      "install": { "source": "brew", "formula": "caddy" },
+      "group": "brew",
+      "dependsOn": ["homebrew"]
     }
   ]
 }

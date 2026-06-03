@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
 import { runCli } from "./cli.js";

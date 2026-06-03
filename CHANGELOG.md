@@ -8,13 +8,18 @@ The project follows Semantic Versioning for the declared public CLI and package 
 
 ### Added
 
-- Public package metadata for the experimental `@skastr0/rig` Bun CLI package.
+- Public package metadata for the experimental `@skastr0/rig` CLI package.
+- Node launcher and npm platform packages for `npx`, `bunx`, and `pnpm dlx` support.
 - Public repository files for license, security reporting, contributing, support, and publishing gates.
 - CI workflow for install, validation, tests, and build.
 - Gated release workflows for npm publishing and draft binary releases.
 
 ### Changed
 
+- Replaced the tracked default `system-config.json` with a public-safe sample configuration.
+- Switched the first npm package plan from a Bun-only source entrypoint to a launcher plus prebuilt platform binaries.
+- Sanitized server-profile documentation examples so they remain copyable without exposing private operator setup.
+- Tightened the npm package file allowlist by removing non-runtime visual assets.
 - Release validation now has a `release:check` script covering verification, npm dry-run packing, dependency audit, and publish scan.
 
 ## [0.1.0] - 2026-05-29

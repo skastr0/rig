@@ -35,7 +35,7 @@ jobs:
         run: bun run verify
 
       - name: Inspect package contents
-        run: npm pack --dry-run
+        run: bun run pack:dry-run
 
-      - name: Publish package
-        run: npm publish --access public
+      - name: Publish packages
+        run: bun run publish:npm
