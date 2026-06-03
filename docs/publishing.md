@@ -8,31 +8,33 @@ rig is experimental. It is useful for local system-configuration workflows, but 
 
 ## Package And Release Map
 
-| Artifact                    | Status            | Channel                                              |
-| --------------------------- | ----------------- | ---------------------------------------------------- |
-| `@skastr0/rig`              | prepared, blocked | npm wrapper package with Node launcher               |
-| `@skastr0/rig-darwin-arm64` | prepared, blocked | npm platform binary package                          |
-| `@skastr0/rig-darwin-x64`   | prepared, blocked | npm platform binary package                          |
-| `@skastr0/rig-linux-arm64`  | prepared, blocked | npm platform binary package                          |
-| `@skastr0/rig-linux-x64`    | prepared, blocked | npm platform binary package                          |
-| `rig-darwin-arm64`          | prepared, blocked | GitHub Release binary                                |
-| `rig-darwin-x64`            | prepared, blocked | GitHub Release binary                                |
-| `rig-linux-arm64`           | prepared, blocked | GitHub Release binary                                |
-| `rig-linux-x64`             | prepared, blocked | GitHub Release binary                                |
-| Homebrew formula            | deferred          | after the first GitHub Release asset shape is stable |
+| Artifact                    | Status    | Channel                                              |
+| --------------------------- | --------- | ---------------------------------------------------- |
+| `@skastr0/rig`              | published | npm wrapper package with Node launcher               |
+| `@skastr0/rig-darwin-arm64` | published | npm platform binary package                          |
+| `@skastr0/rig-darwin-x64`   | published | npm platform binary package                          |
+| `@skastr0/rig-linux-arm64`  | published | npm platform binary package                          |
+| `@skastr0/rig-linux-x64`    | published | npm platform binary package                          |
+| `rig-darwin-arm64`          | tag-ready | GitHub Release binary                                |
+| `rig-darwin-x64`            | tag-ready | GitHub Release binary                                |
+| `rig-linux-arm64`           | tag-ready | GitHub Release binary                                |
+| `rig-linux-x64`             | tag-ready | GitHub Release binary                                |
+| Homebrew formula            | deferred  | after the first GitHub Release asset shape is stable |
 
 The npm package supports `npx`, `bunx`, and `pnpm dlx` by publishing `@skastr0/rig` as a small Node launcher with exact optional dependencies on the four platform packages. The platform packages contain the Bun-compiled standalone binaries. GitHub Releases remain the direct-download binary lane, and Homebrew remains deferred until the first release asset shape is stable.
 
+`0.1.0` was bootstrapped from the local npm CLI after explicit maintainer approval so npm package names could be claimed and trusted publishing could be configured. Future npm publishes should run through `.github/workflows/npm-publish.yml` with npm trusted publishing and the protected `release` environment.
+
 ## Hold-Back Blockers
 
-Do not make the repository public or publish artifacts until these are complete:
+Before publishing a new public artifact, confirm these are complete:
 
 - keep the current tracked `system-config.json` public-safe; historical private config in existing commits is an accepted risk for this repository
 - remove any local `release.md`; it is a temporary coordination file and must not be present before release validation is cleared
 - re-run local validation and package dry-runs after public-surface changes
 - run and manually review the latest `publish-scan` output directory
 - confirm current source, docs, and examples are safe to publish, with original git history accepted for rig
-- enable GitHub secret scanning, push protection, dependency graph, Dependabot alerts, and private vulnerability reporting
+- enable GitHub secret scanning, push protection, dependency graph, Dependabot alerts, and private vulnerability reporting where supported by the repository plan
 - update the GitHub repository description and topics
 - configure npm trusted publishing for `@skastr0/rig` and all four `@skastr0/rig-*` platform packages against `npm-publish.yml`
 - create and protect the GitHub `release` environment with maintainer approval and release-tag restrictions
@@ -60,7 +62,7 @@ bun run release:check
 
 ## npm Trusted Publishing Setup
 
-Before dispatching `.github/workflows/npm-publish.yml`, configure npm trusted publishing for each npm package:
+Before dispatching `.github/workflows/npm-publish.yml` for a new version, confirm npm trusted publishing is configured for each npm package:
 
 - `@skastr0/rig`
 - `@skastr0/rig-darwin-arm64`
@@ -106,6 +108,8 @@ Before dispatching `.github/workflows/release-binaries.yml`:
 The workflow builds `darwin-x64`, `darwin-arm64`, `linux-x64`, and `linux-arm64` standalone binaries and creates a draft GitHub Release with `SHA256SUMS`.
 
 ## Release Order
+
+`0.1.0` npm packages are already live. For the remaining `0.1.0` GitHub Release binary lane, push `v0.1.0`, approve the protected release workflows, inspect the draft release assets and checksums, then publish the draft release.
 
 1. Confirm the current tracked `system-config.json` is public-safe; existing private history is accepted for rig.
 2. Run `bun run release:check` and inspect the npm dry-run package contents.
