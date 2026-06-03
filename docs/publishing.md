@@ -15,15 +15,15 @@ rig is experimental. It is useful for local system-configuration workflows, but 
 | `@skastr0/rig-darwin-x64`   | published | npm platform binary package                          |
 | `@skastr0/rig-linux-arm64`  | published | npm platform binary package                          |
 | `@skastr0/rig-linux-x64`    | published | npm platform binary package                          |
-| `rig-darwin-arm64`          | tag-ready | GitHub Release binary                                |
-| `rig-darwin-x64`            | tag-ready | GitHub Release binary                                |
-| `rig-linux-arm64`           | tag-ready | GitHub Release binary                                |
-| `rig-linux-x64`             | tag-ready | GitHub Release binary                                |
+| `rig-darwin-arm64`          | published | GitHub Release binary                                |
+| `rig-darwin-x64`            | published | GitHub Release binary                                |
+| `rig-linux-arm64`           | published | GitHub Release binary                                |
+| `rig-linux-x64`             | published | GitHub Release binary                                |
 | Homebrew formula            | deferred  | after the first GitHub Release asset shape is stable |
 
 The npm package supports `npx`, `bunx`, and `pnpm dlx` by publishing `@skastr0/rig` as a small Node launcher with exact optional dependencies on the four platform packages. The platform packages contain the Bun-compiled standalone binaries. GitHub Releases remain the direct-download binary lane, and Homebrew remains deferred until the first release asset shape is stable.
 
-`0.1.0` was bootstrapped from the local npm CLI after explicit maintainer approval so npm package names could be claimed and trusted publishing could be configured. Future npm publishes should run through `.github/workflows/npm-publish.yml` with npm trusted publishing and the protected `release` environment.
+`0.1.0` was bootstrapped from the local npm CLI after explicit maintainer approval so npm package names could be claimed and trusted publishing could be configured. The `v0.1.0` GitHub Release publishes the direct-download binary assets with `SHA256SUMS`. Future npm publishes should run through `.github/workflows/npm-publish.yml` with npm trusted publishing and the protected `release` environment.
 
 ## Hold-Back Blockers
 
@@ -109,7 +109,7 @@ The workflow builds `darwin-x64`, `darwin-arm64`, `linux-x64`, and `linux-arm64`
 
 ## Release Order
 
-`0.1.0` npm packages are already live. For the remaining `0.1.0` GitHub Release binary lane, push `v0.1.0`, approve the protected release workflows, inspect the draft release assets and checksums, then publish the draft release.
+`0.1.0` npm packages and GitHub Release binaries are live. For future releases, push a reviewed `vX.Y.Z` tag, approve the protected release workflows, inspect the draft release assets and checksums, then publish the draft release.
 
 1. Confirm the current tracked `system-config.json` is public-safe; existing private history is accepted for rig.
 2. Run `bun run release:check` and inspect the npm dry-run package contents.
