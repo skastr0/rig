@@ -8,6 +8,12 @@ The project follows Semantic Versioning for the declared public CLI and package 
 
 No unreleased changes.
 
+## [0.1.1] - 2026-06-04
+
+### Fixed
+
+- Honor configured `ref` values for `skills` install sources by passing `repo#ref` to the skills CLI.
+
 ## [0.1.0] - 2026-06-03
 
 ### Added
