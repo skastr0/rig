@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "name": "config-root",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["filesystem", "bootstrap"],
+      "check": "~/.config",
+      "onCheck": "path-exists",
+      "install": { "source": "dir", "path": "~/.config" }
+    },
+    {
+      "name": "projects-root",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["filesystem", "bootstrap"],
+      "check": "~/Projects",
+      "onCheck": "path-exists",
+      "install": { "source": "dir", "path": "~/Projects" }
+    },
+    {
+      "name": "homebrew",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["brew", "bootstrap"],
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    },
+    {
+      "name": "mise",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["brew", "runtime", "dev"],
+      "check": "which mise",
+      "install": { "source": "brew", "formula": "mise" },
+      "group": "brew",
+      "dependsOn": ["homebrew"]
+    },
+    {
+      "name": "nodejs",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["runtime", "node", "dev"],
+      "check": "NODE_BIN=\"$(mise which node 2>/dev/null)\" && [ -n \"$NODE_BIN\" ] && [ \"$(command -v node 2>/dev/null)\" = \"$NODE_BIN\" ] && node --version | grep -q '^v24'",
+      "install": "mise use -g node@24",
+      "dependsOn": ["mise"]
+    },
+    {
+      "name": "pnpm",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["runtime", "node", "dev"],
+      "check": "PNPM_BIN=\"$(mise which pnpm 2>/dev/null)\" && [ -n \"$PNPM_BIN\" ] && [ \"$(command -v pnpm 2>/dev/null)\" = \"$PNPM_BIN\" ]",
+      "install": "mise use -g npm:pnpm@latest",
+      "dependsOn": ["nodejs"]
+    },
+    {
+      "name": "neovim",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["brew", "editor", "dev"],
+      "check": "which nvim",
+      "install": { "source": "brew", "formula": "neovim" },
+      "update": "brew upgrade neovim",
+      "group": "brew",
+      "dependsOn": ["homebrew"]
+    },
+    {
+      "name": "ripgrep",
+      "profiles": ["macbook", "workstation"],
+      "tags": ["brew", "search", "dev"],
+      "check": "which rg",
+      "install": { "source": "brew", "formula": "ripgrep" },
+      "group": "brew",
+      "dependsOn": ["homebrew"]
+    },
+    {
+      "name": "dotfiles",
+      "profiles": ["macbook"],
+      "tags": ["git", "config"],
+      "check": "~/.dotfiles",
+      "onCheck": "path-exists",
+      "install": {
+        "source": "git",
+        "repo": "https://github.com/username/dotfiles.git",
+        "path": "~/.dotfiles"
+      },
+      "dependsOn": ["projects-root"],
+      "backup": "~/.zshrc"
+    }
+  ]
+}
