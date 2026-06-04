@@ -66,7 +66,7 @@ export const getSkillPath = (agent: string, skill: string): string | undefined =
   return root === undefined ? undefined : normalizeManagedPath(Path.join(root, skill, "SKILL.md"));
 };
 
-const getSkillsSourceRef = (install: SkillsInstall): string => install.repo;
+const getSkillsSourceRef = (install: SkillsInstall): string => `${install.repo}#${install.ref}`;
 
 export const getSkillsAddArgs = (install: SkillsInstall): readonly string[] => [
   "DISABLE_TELEMETRY=1",
