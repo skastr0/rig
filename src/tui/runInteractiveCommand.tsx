@@ -30,7 +30,7 @@ import {
 import { getRunDisabledReason } from "./safety.js";
 import { useRigKeyboard } from "./useRigKeyboard.js";
 
-interface InteractiveRigAppProps {
+export interface InteractiveRigAppProps {
   readonly options: InteractiveCommandInput["options"];
   readonly configSource: InteractiveCommandInput["configSource"];
   readonly items: readonly SystemItem[];
@@ -61,7 +61,7 @@ const buildProfileOptions = (items: readonly SystemItem[]): SelectOption[] =>
     value: profile.name,
   }));
 
-function InteractiveRigApp({
+export function InteractiveRigApp({
   options,
   configSource,
   items,
