@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { Context, Effect, Layer, Duration } from "effect";
 import { ShellError } from "../errors.js";
+import { createLineBuffer, type LineBuffer } from "./LineBuffer.js";
 
 export interface ShellResult {
   readonly stdout: string;
@@ -13,6 +14,8 @@ export interface ShellExecutionOptions {
   readonly cwd?: string;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
+  readonly onStdoutLine?: (line: string) => void;
+  readonly onStderrLine?: (line: string) => void;
 }
 
 export interface ShellService {
@@ -45,6 +48,7 @@ interface SpawnResult extends ShellResult {
   readonly timedOut: boolean;
   readonly interrupted: boolean;
   readonly timeoutMs: number;
+  readonly callbackError?: string;
   readonly killError?: string;
 }
 
@@ -80,6 +84,23 @@ const signalProcessGroup = (proc: ChildProcess, signal: NodeJS.Signals): string 
     : `Failed to send ${signal} to process group ${pid}: ${groupError}; fallback process signal failed: ${processError}`;
 };
 
+const collectOutput = (
+  chunk: Buffer | string,
+  append: (text: string) => void,
+  emitChunk: ((chunk: string) => void) | undefined,
+  emitLine: LineBuffer,
+  onCallbackError: (error: unknown) => void,
+): void => {
+  const text = chunk.toString();
+  append(text);
+  try {
+    emitChunk?.(text);
+  } catch (error) {
+    onCallbackError(error);
+  }
+  emitLine.push(text);
+};
+
 const spawnProcess = (
   args: readonly string[],
   options?: ShellExecutionOptions,
@@ -89,6 +110,7 @@ const spawnProcess = (
     let completed = false;
     let timedOut = false;
     let interrupted = false;
+    let callbackError: string | undefined;
     let killError: string | undefined;
 
     const [command, ...commandArgs] = args;
@@ -114,18 +136,6 @@ const spawnProcess = (
     let stdout = "";
     let stderr = "";
 
-    proc.stdout.on("data", (chunk: Buffer | string) => {
-      const text = chunk.toString();
-      stdout += text;
-      options?.onStdout?.(text);
-    });
-
-    proc.stderr.on("data", (chunk: Buffer | string) => {
-      const text = chunk.toString();
-      stderr += text;
-      options?.onStderr?.(text);
-    });
-
     const killProcess = (): void => {
       if (!completed) {
         killError ??= signalProcessGroup(proc, "SIGTERM");
@@ -141,6 +151,38 @@ const spawnProcess = (
       interrupted = true;
       killProcess();
     };
+
+    const failCallback = (error: unknown): void => {
+      callbackError ??= formatSignalError(error);
+      killProcess();
+    };
+
+    const stdoutLines = createLineBuffer(options?.onStdoutLine, failCallback);
+    const stderrLines = createLineBuffer(options?.onStderrLine, failCallback);
+
+    proc.stdout.on("data", (chunk: Buffer | string) =>
+      collectOutput(
+        chunk,
+        (text) => {
+          stdout += text;
+        },
+        options?.onStdout,
+        stdoutLines,
+        failCallback,
+      ),
+    );
+
+    proc.stderr.on("data", (chunk: Buffer | string) =>
+      collectOutput(
+        chunk,
+        (text) => {
+          stderr += text;
+        },
+        options?.onStderr,
+        stderrLines,
+        failCallback,
+      ),
+    );
 
     const timeoutId = setTimeout(() => {
       timedOut = true;
@@ -159,6 +201,8 @@ const spawnProcess = (
         clearTimeout(killEscalationId);
       }
       signal.removeEventListener("abort", abortProcess);
+      stdoutLines.flush();
+      stderrLines.flush();
       resume(
         Effect.fail(
           new ShellError({
@@ -182,6 +226,8 @@ const spawnProcess = (
         clearTimeout(killEscalationId);
       }
       signal.removeEventListener("abort", abortProcess);
+      stdoutLines.flush();
+      stderrLines.flush();
       resume(
         Effect.succeed({
           stdout,
@@ -190,25 +236,23 @@ const spawnProcess = (
           timedOut,
           interrupted,
           timeoutMs,
+          ...(callbackError === undefined ? {} : { callbackError }),
           ...(killError === undefined ? {} : { killError }),
         }),
       );
     });
   }).pipe(
     Effect.flatMap((result) =>
-      result.interrupted
+      result.callbackError !== undefined
         ? Effect.fail(
             new ShellError({
               command: args.join(" "),
               exitCode: -1,
               stdout: result.stdout,
-              stderr:
-                result.killError === undefined
-                  ? "Process interrupted"
-                  : `Process interrupted; ${result.killError}`,
+              stderr: `Output callback failed: ${result.callbackError}`,
             }),
           )
-        : result.timedOut
+        : result.interrupted
           ? Effect.fail(
               new ShellError({
                 command: args.join(" "),
@@ -216,26 +260,38 @@ const spawnProcess = (
                 stdout: result.stdout,
                 stderr:
                   result.killError === undefined
-                    ? formatTimeoutMessage(result.timeoutMs, result.stderr)
-                    : `${formatTimeoutMessage(result.timeoutMs, result.stderr)}; ${result.killError}`,
-                timedOut: true,
-                timeoutMs: result.timeoutMs,
+                    ? "Process interrupted"
+                    : `Process interrupted; ${result.killError}`,
               }),
             )
-          : result.exitCode !== 0
+          : result.timedOut
             ? Effect.fail(
                 new ShellError({
                   command: args.join(" "),
-                  exitCode: result.exitCode,
+                  exitCode: -1,
                   stdout: result.stdout,
-                  stderr: result.stderr,
+                  stderr:
+                    result.killError === undefined
+                      ? formatTimeoutMessage(result.timeoutMs, result.stderr)
+                      : `${formatTimeoutMessage(result.timeoutMs, result.stderr)}; ${result.killError}`,
+                  timedOut: true,
+                  timeoutMs: result.timeoutMs,
                 }),
               )
-            : Effect.succeed({
-                stdout: result.stdout,
-                stderr: result.stderr,
-                exitCode: result.exitCode,
-              }),
+            : result.exitCode !== 0
+              ? Effect.fail(
+                  new ShellError({
+                    command: args.join(" "),
+                    exitCode: result.exitCode,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                  }),
+                )
+              : Effect.succeed({
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                  exitCode: result.exitCode,
+                }),
     ),
   );
 

@@ -47,21 +47,18 @@ export const emitVerbose = (options: ExecutorOptions | undefined, message: strin
   }
 };
 
-const emitCommandStream = (
+const emitCommandLine = (
   itemName: string,
   stream: "stdout" | "stderr",
-  output: string,
+  line: string,
   options: ExecutorOptions | undefined,
 ): void => {
-  const normalized = output.trimEnd();
-  if (normalized.trim().length === 0) {
+  if (line.trim().length === 0) {
     return;
   }
 
-  for (const line of normalized.split(/\r?\n/)) {
-    options?.onOutput?.({ itemName, stream, line });
-    emitVerbose(options, `[${itemName}] ${stream}: ${line}`);
-  }
+  options?.onOutput?.({ itemName, stream, line });
+  emitVerbose(options, `[${itemName}] ${stream}: ${line}`);
 };
 
 const toTimeoutOptions = (
@@ -77,8 +74,8 @@ const toCommandOptions = (
   const shellOptions = {
     ...(timeout === undefined ? {} : { timeout }),
     ...(cwd === undefined ? {} : { cwd }),
-    onStdout: (chunk: string) => emitCommandStream(itemName, "stdout", chunk, executorOptions),
-    onStderr: (chunk: string) => emitCommandStream(itemName, "stderr", chunk, executorOptions),
+    onStdoutLine: (line: string) => emitCommandLine(itemName, "stdout", line, executorOptions),
+    onStderrLine: (line: string) => emitCommandLine(itemName, "stderr", line, executorOptions),
   };
 
   return shellOptions;

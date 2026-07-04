@@ -5,6 +5,7 @@ import * as Path from "node:path";
 import { Executor, ExecutorLive, type ExecutionResult } from "./Executor.js";
 import { topologicalSort } from "./Planner.js";
 import { ShellService } from "../services/ShellService.js";
+import { createLineBuffer } from "../services/LineBuffer.js";
 import { BackupService, type BackupResult } from "../services/BackupService.js";
 import { GitService } from "../services/GitService.js";
 import { BrewService, BrewServiceLive } from "../services/BrewService.js";
@@ -59,6 +60,36 @@ const makeScriptItem = (
   ...(opts?.update === undefined ? {} : { update: opts.update }),
   ...(opts?.timeout === undefined ? {} : { timeout: opts.timeout }),
 });
+
+const emitBufferedShellOutput = (
+  options: Parameters<ShellService["run"]>[1] | undefined,
+  stdoutChunks: readonly string[],
+  stderrChunks: readonly string[] = [],
+): void => {
+  const errors: unknown[] = [];
+  const onCallbackError = (error: unknown): void => {
+    errors.push(error);
+  };
+  const stdoutLines = createLineBuffer(options?.onStdoutLine, onCallbackError);
+  const stderrLines = createLineBuffer(options?.onStderrLine, onCallbackError);
+
+  for (const chunk of stdoutChunks) {
+    options?.onStdout?.(chunk);
+    stdoutLines.push(chunk);
+  }
+
+  for (const chunk of stderrChunks) {
+    options?.onStderr?.(chunk);
+    stderrLines.push(chunk);
+  }
+
+  stdoutLines.flush();
+  stderrLines.flush();
+
+  if (errors.length > 0) {
+    throw errors[0];
+  }
+};
 
 const makeBrewItem = (
   name: string,
@@ -1664,8 +1695,8 @@ describe("Executor", () => {
           }
 
           if (command === "tool update") {
-            options?.onStdout?.("Updated active version");
-            options?.onStderr?.("warning: extra install skipped");
+            options?.onStdoutLine?.("Updated active version");
+            options?.onStderrLine?.("warning: extra install skipped");
 
             return Effect.succeed({
               stdout: "Updated active version",
@@ -1706,6 +1737,69 @@ describe("Executor", () => {
       expect(verboseMessages).toContain("[a] update: tool update");
       expect(verboseMessages).toContain("[a] stdout: Updated active version");
       expect(verboseMessages).toContain("[a] stderr: warning: extra install skipped");
+    });
+
+    it("emits command output from complete shell lines", async () => {
+      const shell: ShellService = {
+        run: (command, options) => {
+          if (command.startsWith("which ")) {
+            return Effect.succeed({ stdout: "/usr/bin/a", stderr: "", exitCode: 0 });
+          }
+
+          if (command === "tool update") {
+            emitBufferedShellOutput(
+              options,
+              ["Installing", " package\n\nNext", " step"],
+              ["warning: cached", " formula\n"],
+            );
+
+            return Effect.succeed({
+              stdout: "Installing package\n\nNext step",
+              stderr: "warning: cached formula\n",
+              exitCode: 0,
+            });
+          }
+
+          return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
+        },
+        exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      };
+
+      const items = [makeItem("a", { update: "tool update" })];
+      const plan = await Effect.runPromise(topologicalSort(items));
+      const output: { itemName: string; stream: "stdout" | "stderr"; line: string }[] = [];
+
+      const layer = Layer.mergeAll(
+        Layer.succeed(ShellService, shell),
+        Layer.succeed(BackupService, mockBackupService),
+        Layer.succeed(GitService, mockGitService),
+        Layer.succeed(BrewService, mockBrewService),
+        Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+        ExecutorLive,
+      );
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            update: true,
+            onOutput: (event) => output.push(event),
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(output).toHaveLength(3);
+      expect(output).toContainEqual({
+        itemName: "a",
+        stream: "stdout",
+        line: "Installing package",
+      });
+      expect(output).toContainEqual({ itemName: "a", stream: "stdout", line: "Next step" });
+      expect(output).toContainEqual({
+        itemName: "a",
+        stream: "stderr",
+        line: "warning: cached formula",
+      });
     });
 
     it("should skip update when --update flag is not set", async () => {
