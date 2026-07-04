@@ -10,6 +10,7 @@ export interface RigKeyboardState {
   readonly stage: TuiStage;
   readonly filterActive: boolean;
   readonly filterQuery: string;
+  readonly logsOpen?: boolean;
 }
 
 export interface RigKeyboardActions {
@@ -112,7 +113,7 @@ const handleNavigationKey = (
     return true;
   }
 
-  if ((name === "escape" || name === "backspace") && !state.running) {
+  if ((name === "escape" || name === "backspace") && (state.logsOpen === true || !state.running)) {
     actions.back();
     return true;
   }

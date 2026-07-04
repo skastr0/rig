@@ -4,6 +4,7 @@ import { testRender } from "@opentui/react/test-utils";
 import type { CliOptions } from "../cli.js";
 import type { ExecutionResult } from "../engine/Executor.js";
 import type { SystemItem } from "../schema/config.js";
+import { maxRenderedLogLines } from "./logBuffer.js";
 import { InteractiveRigApp } from "./runInteractiveCommand.js";
 import type { ExecuteInteractiveRun } from "./runner.js";
 
@@ -53,7 +54,7 @@ const pressAndSettle = async (press: () => void): Promise<void> => {
   });
 };
 
-test("InteractiveRigApp drives preview execution and renders emitted log rows", async () => {
+test("InteractiveRigApp drives preview execution, renders item progress, and inspects logs", async () => {
   const requests: Parameters<ExecuteInteractiveRun>[0][] = [];
   const executeRun: ExecuteInteractiveRun = async (request, emit) => {
     requests.push(request);
@@ -61,12 +62,28 @@ test("InteractiveRigApp drives preview execution and renders emitted log rows", 
     emit({
       kind: "output",
       itemName: "ripgrep",
-      message: "[ripgrep] stdout: Installing package",
+      label: "[ripgrep] stdout:",
+      message: "Installing package",
     });
     emit({
       kind: "output",
       itemName: "ripgrep",
-      message: "[ripgrep] stdout: Next step",
+      label: "[ripgrep] stdout:",
+      message: "Next step",
+    });
+    emit({
+      kind: "progress",
+      itemName: "homebrew",
+      message: "homebrew: skipped",
+      resultAction: "skipped",
+      resultStatus: "installed",
+    });
+    emit({
+      kind: "progress",
+      itemName: "ripgrep",
+      message: "ripgrep: installed",
+      resultAction: "installed",
+      resultStatus: "installed",
     });
 
     return {
@@ -101,20 +118,56 @@ test("InteractiveRigApp drives preview execution and renders emitted log rows", 
     await setup.waitForFrame((frame) => frame.includes("Choose tags") && frame.includes("dev"));
 
     await pressAndSettle(() => setup.mockInput.pressEnter());
-    await setup.waitForFrame(
+    const reviewFrame = await setup.waitForFrame(
       (frame) => frame.includes("Review selection") && frame.includes("2 total"),
     );
 
+    expect(reviewFrame).toContain("dependency map");
+    expect(reviewFrame).toContain("homebrew");
+    expect(reviewFrame).toContain("required by: ripgrep");
+    expect(reviewFrame).not.toContain("Dependency tree");
+
     await pressAndSettle(() => setup.mockInput.pressKey("p"));
 
-    const frame = await setup.waitForFrame(
+    const boardFrame = await setup.waitForFrame(
       (candidate) =>
-        candidate.includes("[ripgrep] stdout: Installing package") &&
-        candidate.includes("[ripgrep] stdout: Next step") &&
-        candidate.includes("completed 2 items"),
+        candidate.includes("install board") &&
+        candidate.includes("homebrew") &&
+        candidate.includes("ripgrep") &&
+        candidate.includes("installed  100%"),
     );
 
-    expect(frame).toContain("Run complete");
+    expect(boardFrame).toContain("Run complete");
+    expect(boardFrame).not.toContain("[ripgrep] stdout: Installing package");
+
+    await pressAndSettle(() => setup.mockInput.pressArrow("down"));
+    await pressAndSettle(() => setup.mockInput.pressArrow("down"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+
+    const logFrame = await setup.waitForFrame(
+      (candidate) =>
+        candidate.includes("logs / ripgrep") &&
+        candidate.includes("[ripgrep] stdout: Installing package") &&
+        candidate.includes("[ripgrep] stdout: Next step"),
+    );
+
+    expect(logFrame).toContain("Press b or escape to return to the install board.");
+
+    await pressAndSettle(() => setup.mockInput.pressEscape());
+    await setup.waitForFrame(
+      (candidate) => candidate.includes("install board") && !candidate.includes("logs / ripgrep"),
+    );
+
+    await pressAndSettle(() => setup.mockInput.pressEscape());
+    const returnedReviewFrame = await setup.waitForFrame(
+      (candidate) =>
+        candidate.includes("Review selection") &&
+        candidate.includes("dependency map") &&
+        candidate.includes("depends on: homebrew"),
+    );
+
+    expect(returnedReviewFrame).not.toContain("logs / ripgrep");
+    expect(returnedReviewFrame).not.toContain("[ripgrep] stdout: Installing package");
     expect(requests).toEqual([
       {
         profile: "macbook",
@@ -126,6 +179,123 @@ test("InteractiveRigApp drives preview execution and renders emitted log rows", 
         apply: false,
       },
     ]);
+  } finally {
+    act(() => {
+      setup.renderer.destroy();
+    });
+  }
+});
+
+test("InteractiveRigApp keeps high-volume install logs bounded and coalesces progress rows", async () => {
+  const executeRun: ExecuteInteractiveRun = async (_request, emit) => {
+    emit({ kind: "system", message: "running noisy install" });
+
+    for (let index = 0; index < 25; index += 1) {
+      emit({
+        kind: "output",
+        itemName: "ripgrep",
+        label: "[ripgrep] stdout:",
+        coalesceKey: "ripgrep:stdout",
+        displayMode: "append",
+        message: index % 2 === 0 ? "\u001B[2K\u001B[?25l      \t      " : "        ",
+      });
+    }
+
+    for (let index = 0; index < maxRenderedLogLines + 40; index += 1) {
+      emit({
+        kind: "output",
+        itemName: "ripgrep",
+        label: "[ripgrep] stdout:",
+        coalesceKey: "ripgrep:stdout",
+        displayMode: "append",
+        replaceable: false,
+        message: `log ${index}`,
+      });
+    }
+
+    for (let index = 0; index < 50; index += 1) {
+      emit({
+        kind: "output",
+        itemName: "ripgrep",
+        label: "[ripgrep] stdout:",
+        coalesceKey: "ripgrep:stdout",
+        displayMode: "replace",
+        replaceable: true,
+        message: `\u001B[32mdownloading ${index}%\u001B[0m`,
+      });
+    }
+
+    emit({
+      kind: "output",
+      itemName: "ripgrep",
+      label: "[ripgrep] stdout:",
+      coalesceKey: "ripgrep:stdout",
+      displayMode: "replace",
+      replaceable: false,
+      message: "download complete",
+    });
+    emit({
+      kind: "progress",
+      itemName: "ripgrep",
+      message: "ripgrep: installed",
+      resultAction: "installed",
+      resultStatus: "installed",
+    });
+
+    return {
+      results: [result("ripgrep", "installed", "installed")],
+    };
+  };
+
+  const setup = await testRender(
+    <InteractiveRigApp
+      options={baseOptions}
+      configSource={{ _tag: "local", path: "./system-config.json" }}
+      items={[makeItem("ripgrep")]}
+      executeRun={executeRun}
+      onExit={() => undefined}
+    />,
+    { width: 130, height: 40 },
+  );
+
+  try {
+    await settle();
+    await setup.waitForFrame(
+      (frame) => frame.includes("Choose profile") && frame.includes("macbook"),
+    );
+
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Choose tags") && frame.includes("dev"));
+
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame(
+      (frame) => frame.includes("Review selection") && frame.includes("1 total"),
+    );
+
+    await pressAndSettle(() => setup.mockInput.pressKey("p"));
+
+    const frame = await setup.waitForFrame(
+      (candidate) =>
+        candidate.includes("install board") &&
+        candidate.includes("ripgrep") &&
+        candidate.includes("download complete"),
+    );
+
+    expect(frame).toContain("Run complete");
+    expect(frame).not.toContain("[ripgrep] stdout: log 0");
+    expect(frame).not.toContain("[ripgrep] stdout: downloading 49%");
+    expect(frame).not.toContain("[ripgrep] stdout:\n");
+
+    await pressAndSettle(() => setup.mockInput.pressArrow("down"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+
+    const logFrame = await setup.waitForFrame(
+      (candidate) =>
+        candidate.includes("logs / ripgrep") &&
+        candidate.includes("[ripgrep] stdout: download complete"),
+    );
+
+    expect(logFrame).not.toContain("[ripgrep] stdout:\n");
   } finally {
     act(() => {
       setup.renderer.destroy();

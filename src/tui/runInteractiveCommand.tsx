@@ -7,18 +7,20 @@ import { ConfigError } from "../errors.js";
 import { AppRuntime } from "../runtime.js";
 import type { SystemItem } from "../schema/config.js";
 import { AppHeader, DetailsPane, Footer, SelectorPane } from "./components.js";
+import { applyRunLogs, createInitialRunItems, type TuiRunItemState } from "./executionBoard.js";
 import {
   buildProfileRows,
   buildTagRows,
+  buildDependencyRows,
   filterOptions,
   filterLogsByItem,
   formatReasonBadge,
-  formatDependencyTreeLines,
   getItemPreviewLines,
   summarizeSelection,
   type TuiLogLine,
   type TuiStage,
 } from "./model.js";
+import { appendBufferedLogs, getRenderedLogWindow } from "./logBuffer.js";
 import { tuiPalette as palette } from "./palette.js";
 import {
   executeInteractivePlan,
@@ -88,10 +90,15 @@ export function InteractiveRigApp({
   const [update, setUpdate] = useState(options.update);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<readonly TuiLogLine[]>([]);
+  const [runItems, setRunItems] = useState<readonly TuiRunItemState[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [filterActive, setFilterActive] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const runningRef = useRef(false);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
+  const pendingLogsRef = useRef<PendingLogLine[]>([]);
+  const logFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const nextLogIdRef = useRef(1);
   const runDisabledReason = getRunDisabledReason(configSource, options);
   const canRun = runDisabledReason === undefined;
 
@@ -182,21 +189,59 @@ export function InteractiveRigApp({
     ? executionSummary.analysis.itemMap.get(selectedItemName)
     : undefined;
   const itemPreviewLines = getItemPreviewLines(selectedItem, update);
-  const idlePreviewLines =
-    itemPreviewLines.length > 0 ? itemPreviewLines : formatDependencyTreeLines(previewSummary);
-  const visibleLogs = filterLogsByItem(logs, selectedItemName);
+  const dependencyRows = useMemo(
+    () => buildDependencyRows(previewSummary, selectedItemName),
+    [previewSummary, selectedItemName],
+  );
+  const visibleLogs = useMemo(
+    () => getRenderedLogWindow(filterLogsByItem(logs, selectedItemName)),
+    [logs, selectedItemName],
+  );
 
-  const appendLog = useCallback((line: PendingLogLine) => {
-    setLogs((current) => [
-      ...current,
-      {
-        ...line,
-        id: current.length + 1,
-      },
-    ]);
+  const clearScheduledLogFlush = useCallback(() => {
+    if (logFlushTimeoutRef.current !== undefined) {
+      clearTimeout(logFlushTimeoutRef.current);
+      logFlushTimeoutRef.current = undefined;
+    }
   }, []);
 
+  const flushPendingLogs = useCallback(() => {
+    clearScheduledLogFlush();
+
+    if (pendingLogsRef.current.length === 0) {
+      return;
+    }
+
+    const pending = pendingLogsRef.current;
+    pendingLogsRef.current = [];
+    setRunItems((current) => applyRunLogs(current, pending));
+    setLogs((current) =>
+      appendBufferedLogs(current, pending, () => {
+        const id = nextLogIdRef.current;
+        nextLogIdRef.current += 1;
+        return id;
+      }),
+    );
+  }, [clearScheduledLogFlush]);
+
+  const appendLog = useCallback(
+    (line: PendingLogLine) => {
+      pendingLogsRef.current.push(line);
+      if (logFlushTimeoutRef.current === undefined) {
+        logFlushTimeoutRef.current = setTimeout(flushPendingLogs, 16);
+      }
+    },
+    [flushPendingLogs],
+  );
+
+  useEffect(() => () => clearScheduledLogFlush(), [clearScheduledLogFlush]);
+
   const goBack = useCallback(() => {
+    if (logsOpen) {
+      setLogsOpen(false);
+      return;
+    }
+
     if (running) {
       return;
     }
@@ -207,13 +252,24 @@ export function InteractiveRigApp({
       return;
     }
 
-    if (stage === "review" || stage === "done") {
+    if (stage === "done") {
+      setLogsOpen(false);
+      setStage("review");
+      return;
+    }
+
+    if (stage === "review") {
       setStage("tags");
       setSelectedIndex(0);
     }
-  }, [running, selectedProfileIndex, stage]);
+  }, [logsOpen, running, selectedProfileIndex, stage]);
 
   const advance = useCallback(() => {
+    if ((stage === "running" || stage === "done") && selectedItemName !== undefined) {
+      setLogsOpen(true);
+      return;
+    }
+
     if (running) {
       return;
     }
@@ -235,8 +291,9 @@ export function InteractiveRigApp({
     if (stage === "tags") {
       setStage("review");
       setSelectedIndex(0);
+      return;
     }
-  }, [profileRows, running, selectedOption?.value, stage]);
+  }, [profileRows, running, selectedItemName, selectedOption?.value, stage]);
 
   const toggleTag = useCallback(() => {
     if (running || stage !== "tags") {
@@ -260,11 +317,12 @@ export function InteractiveRigApp({
   }, [running, selectedOption?.value, stage]);
 
   const finishRun = useCallback(() => {
+    flushPendingLogs();
     runningRef.current = false;
     abortControllerRef.current = undefined;
     setRunning(false);
     setStage("done");
-  }, []);
+  }, [flushPendingLogs]);
 
   const runSelection = useCallback(
     async (dryRun: boolean, signal: AbortSignal): Promise<void> => {
@@ -319,7 +377,14 @@ export function InteractiveRigApp({
         return;
       }
 
+      clearScheduledLogFlush();
+      pendingLogsRef.current = [];
+      nextLogIdRef.current = 1;
+      setLogsOpen(false);
       setLogs([]);
+      setRunItems(
+        createInitialRunItems(selectedItems, selectedProfile, executionSummary.analysis.reasons),
+      );
       setStage("running");
       setSelectedIndex(0);
       runningRef.current = true;
@@ -334,7 +399,18 @@ export function InteractiveRigApp({
         finishRun();
       });
     },
-    [appendLog, canRun, finishRun, runDisabledReason, runSelection, selectedItems.length],
+    [
+      appendLog,
+      canRun,
+      clearScheduledLogFlush,
+      finishRun,
+      runDisabledReason,
+      runSelection,
+      executionSummary.analysis.reasons,
+      selectedItems.length,
+      selectedItems,
+      selectedProfile,
+    ],
   );
 
   const cancelRun = useCallback(() => {
@@ -347,7 +423,7 @@ export function InteractiveRigApp({
   }, [appendLog]);
 
   useRigKeyboard(
-    { running, stage, filterActive, filterQuery },
+    { running, stage, filterActive, filterQuery, logsOpen },
     {
       exit: onExit,
       cancel: cancelRun,
@@ -422,12 +498,16 @@ export function InteractiveRigApp({
           runDisabledReason={runDisabledReason}
           selectedItemName={selectedItemName}
           selectedItemReason={selectedItemReason}
-          itemPreviewLines={idlePreviewLines}
+          dependencyRows={dependencyRows}
+          itemPreviewLines={itemPreviewLines}
           logs={visibleLogs}
+          runItems={runItems}
+          logsOpen={logsOpen}
         />
       </box>
 
       <Footer
+        stage={stage}
         running={running}
         verbose={verbose}
         update={update}
@@ -435,6 +515,7 @@ export function InteractiveRigApp({
         runDisabledReason={runDisabledReason}
         filterActive={filterActive}
         filterQuery={filterQuery}
+        logsOpen={logsOpen}
       />
     </box>
   );

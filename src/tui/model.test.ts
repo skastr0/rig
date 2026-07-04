@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SystemItem } from "../schema/config.js";
 import {
+  buildDependencyRows,
   buildProfileRows,
   buildTagRows,
   filterOptions,
@@ -78,6 +79,42 @@ describe("TUI model", () => {
     expect(summary.directCount).toBe(1);
     expect(summary.dependencyCount).toBe(1);
     expect(formatReasonBadge(summary.analysis.reasons.get("tailscale"))).toBe("dependency");
+  });
+
+  it("builds dependency rows with sources and relationship metadata", () => {
+    const summary = summarizeSelection(
+      [
+        makeItem("homebrew", { tags: ["brew"] }),
+        makeItem("ripgrep", { tags: ["dev"], dependsOn: ["homebrew"] }),
+      ],
+      "macbook",
+      ["dev"],
+    );
+
+    expect(buildDependencyRows(summary, "ripgrep")).toEqual([
+      {
+        name: "homebrew",
+        reason: "dependency",
+        tags: ["brew"],
+        bundle: "macbook",
+        source: "shell",
+        dependsOn: [],
+        dependedOnBy: ["ripgrep"],
+        path: ["ripgrep", "homebrew"],
+        selected: false,
+      },
+      {
+        name: "ripgrep",
+        reason: "direct",
+        tags: ["dev"],
+        bundle: "macbook",
+        source: "shell",
+        dependsOn: ["homebrew"],
+        dependedOnBy: [],
+        path: ["ripgrep"],
+        selected: true,
+      },
+    ]);
   });
 
   it("applies --only as part of interactive summaries", () => {

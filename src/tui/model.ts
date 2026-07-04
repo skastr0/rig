@@ -31,11 +31,25 @@ export interface SelectionSummary {
   readonly dependencyCount: number;
 }
 
+export interface TuiDependencyRow {
+  readonly name: string;
+  readonly reason: "direct" | "dependency";
+  readonly tags: readonly string[];
+  readonly bundle: string;
+  readonly source: string;
+  readonly dependsOn: readonly string[];
+  readonly dependedOnBy: readonly string[];
+  readonly path: readonly string[];
+  readonly selected: boolean;
+}
+
 export interface TuiLogLine {
   readonly id: number;
   readonly kind: LogKind;
   readonly message: string;
   readonly itemName?: string;
+  readonly coalesceKey?: string;
+  readonly replaceable?: boolean;
 }
 
 export interface FilterableOption {
@@ -144,6 +158,55 @@ export const formatExecutionPreviewLogs = (result: ExecutionResult): readonly st
     ...result.preview.steps.map((step) => `${result.name}: ${step}`),
   ];
 };
+
+export const getInstallSourceLabel = (item: SystemItem): string => {
+  if (typeof item.install === "string") {
+    return "shell";
+  }
+
+  switch (item.install.source) {
+    case "brew":
+      return item.install.cask ? "brew cask" : "brew";
+    case "script":
+      return item.install.interpreter;
+    default:
+      return item.install.source;
+  }
+};
+
+const selectedDependencyNames = (
+  item: SystemItem,
+  selectedNames: ReadonlySet<string>,
+): readonly string[] =>
+  (item.dependsOn ?? []).filter((dependency) => selectedNames.has(dependency));
+
+const selectedDependentNames = (
+  item: SystemItem,
+  selectedItems: readonly SystemItem[],
+): readonly string[] =>
+  selectedItems
+    .filter((candidate) => candidate.dependsOn?.includes(item.name) ?? false)
+    .map((candidate) => candidate.name);
+
+export const buildDependencyRows = (
+  summary: SelectionSummary,
+  selectedItemName: string | undefined,
+): readonly TuiDependencyRow[] =>
+  summary.analysis.selectedItems.map((item) => {
+    const reason = summary.analysis.reasons.get(item.name);
+
+    return {
+      name: item.name,
+      reason: reason?.type ?? "dependency",
+      tags: item.tags,
+      bundle: item.group ?? summary.analysis.options.profile,
+      source: getInstallSourceLabel(item),
+      dependsOn: selectedDependencyNames(item, summary.analysis.selectedNames),
+      dependedOnBy: selectedDependentNames(item, summary.analysis.selectedItems),
+      path: reason?.type === "dependency" ? reason.path : [item.name],
+      selected: item.name === selectedItemName,
+    };
+  });
 
 export const filterOptions = <TOption extends FilterableOption>(
   options: readonly TOption[],

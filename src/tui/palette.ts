@@ -7,6 +7,8 @@ export const tuiPalette = {
   muted: "#8d8576",
   amber: "#d6a94a",
   cyan: "#6dc7d1",
+  blue: "#5aa7ff",
+  green: "#72d27e",
   violet: "#9a7bdc",
   crimson: "#d65f5f",
 };

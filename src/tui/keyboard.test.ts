@@ -34,6 +34,19 @@ describe("TUI keyboard handling", () => {
     expect(actions.back).toHaveBeenCalledTimes(2);
   });
 
+  it("lets escape close log inspection while a run is active", () => {
+    const actions = makeActions();
+
+    handleRigKey(
+      { name: "escape" },
+      { ...baseState, stage: "running", running: true, logsOpen: true },
+      actions,
+    );
+    handleRigKey({ name: "escape" }, { ...baseState, stage: "running", running: true }, actions);
+
+    expect(actions.back).toHaveBeenCalledTimes(1);
+  });
+
   it("starts and edits selector filtering", () => {
     const actions = makeActions();
 
