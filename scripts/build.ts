@@ -64,7 +64,10 @@ Build complete!
 
 Binaries available at: ${distDir}/
 
-To install locally (compiles for your host directly — does not require this build step):
+To try local changes without replacing production rig:
+  bun run install:dev
+
+To replace the production rig command:
   bun run install:local
 
 To test:

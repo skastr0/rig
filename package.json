@@ -42,6 +42,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun scripts/build.ts",
+    "install:dev": "bun scripts/install-dev.ts",
     "install:local": "bun scripts/install.ts",
     "test": "vitest run && bun test src/tui/runInteractiveCommand.e2e.test.tsx",
     "typecheck": "tsc --noEmit",

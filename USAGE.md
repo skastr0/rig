@@ -544,6 +544,15 @@ For configs not in a repo:
 
 ## Development Environment Setup
 
+During Rig development, install the checkout as `rig-dev` so you can smoke local changes without replacing the production `rig` command:
+
+```bash
+bun run install:dev
+rig-dev --help
+```
+
+The dev installer stores the compiled host binary under `.rig-dev/bin/` and links `~/.local/bin/rig-dev` to it, so normal release builds do not overwrite the development command.
+
 ### Complete Node.js Setup
 
 ```json

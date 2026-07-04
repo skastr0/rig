@@ -2,6 +2,8 @@ import { Args, CliApp, Command, Options, ValidationError as CliValidationError }
 import { Effect, Option } from "effect";
 import { defaultConfigSource, defaultGitHubConfigPath } from "./configSource.js";
 
+declare const APP_BINARY_NAME: string | undefined;
+
 export interface CliOptions {
   readonly config: string;
   readonly profile: string | undefined;
@@ -103,6 +105,9 @@ const cliOptions = {
   update,
 };
 
+const defaultBinaryName = (): string =>
+  typeof APP_BINARY_NAME === "string" && APP_BINARY_NAME.length > 0 ? APP_BINARY_NAME : "rig";
+
 const resolveConfigInput = (
   source: Option.Option<string>,
   config: Option.Option<string>,
@@ -120,8 +125,9 @@ const resolveConfigInput = (
 
 export const makeCommand = <E, R>(
   handler: (options: CliOptions) => Effect.Effect<void, E, R>,
-): Command.Command<"rig", R, E, Command.Command.ParseConfig<typeof cliOptions>> =>
-  Command.make("rig", cliOptions, (opts) =>
+  binaryName = defaultBinaryName(),
+): Command.Command<string, R, E, Command.Command.ParseConfig<typeof cliOptions>> =>
+  Command.make(binaryName, cliOptions, (opts) =>
     handler({
       config: resolveConfigInput(opts.source, opts.config),
       profile: Option.getOrUndefined(opts.profile),
@@ -143,28 +149,28 @@ export const makeCommand = <E, R>(
 Reads a JSON config source and installs only what's missing. Items are checked
 for existence before installing. Use --dry-run to preview local changes.
 Remote HTTPS configs and GitHub shorthand preview by default and require --apply to execute.
-Bare rig opens the interactive TUI. Headless execution requires --ci --profile <name>.
+Bare ${binaryName} opens the interactive TUI. Headless execution requires --ci --profile <name>.
 
 Quick Start:
-  rig --init                                         # Create ./system-config.json
-  rig --init ./work-config.json                      # Create a starter config at a custom path
-  rig                                                # Open the interactive TUI
-  rig --ci --profile macbook --dry-run               # Preview a local config
-  rig --ci --profile macbook                         # Apply ./system-config.json
-  rig --ci --profile macbook https://example.com/system-config.json
+  ${binaryName} --init                                         # Create ./system-config.json
+  ${binaryName} --init ./work-config.json                      # Create a starter config at a custom path
+  ${binaryName}                                                # Open the interactive TUI
+  ${binaryName} --ci --profile macbook --dry-run               # Preview a local config
+  ${binaryName} --ci --profile macbook                         # Apply ./system-config.json
+  ${binaryName} --ci --profile macbook https://example.com/system-config.json
                                                      # Preview a remote config
-  rig --ci --profile macbook gh:user/repo            # Preview repo-root ${defaultGitHubConfigPath} from GitHub
-  rig --ci --profile macbook gh:user/repo@<40-char-commit>
+  ${binaryName} --ci --profile macbook gh:user/repo            # Preview repo-root ${defaultGitHubConfigPath} from GitHub
+  ${binaryName} --ci --profile macbook gh:user/repo@<40-char-commit>
                                                      # Preview a pinned GitHub config
-  rig 'https://example.com/system-config.json#sha256=<digest>'
+  ${binaryName} 'https://example.com/system-config.json#sha256=<digest>'
                                                             # Preview with integrity verification
-  rig --ci --profile macbook --apply https://example.com/system-config.json
+  ${binaryName} --ci --profile macbook --apply https://example.com/system-config.json
                                                      # Apply a remote config
-  rig --ci --profile macbook --apply gh:user/repo    # Apply a GitHub shorthand config
-  rig --ci -p macbook -t dev -t editor               # Install items with dev OR editor tags
-  rig --ci -p macbook --status                       # Inspect current item status without installing
-  rig --ci -p macbook --why neovim                   # Explain why 'neovim' is selected
-  rig --ci -p macbook --update                       # Update installed items
+  ${binaryName} --ci --profile macbook --apply gh:user/repo    # Apply a GitHub shorthand config
+  ${binaryName} --ci -p macbook -t dev -t editor               # Install items with dev OR editor tags
+  ${binaryName} --ci -p macbook --status                       # Inspect current item status without installing
+  ${binaryName} --ci -p macbook --why neovim                   # Explain why 'neovim' is selected
+  ${binaryName} --ci -p macbook --update                       # Update installed items
 
 Docs: See USAGE.md for examples and patterns`,
     ),
@@ -172,10 +178,11 @@ Docs: See USAGE.md for examples and patterns`,
 
 export const runCli = <E, R>(
   handler: (options: CliOptions) => Effect.Effect<void, E, R>,
+  binaryName = defaultBinaryName(),
 ): ((
   args: ReadonlyArray<string>,
 ) => Effect.Effect<void, E | CliValidationError.ValidationError, R | CliApp.CliApp.Environment>) =>
-  Command.run(makeCommand(handler), {
-    name: "rig",
+  Command.run(makeCommand(handler, binaryName), {
+    name: binaryName,
     version: "0.1.1",
   });

@@ -11,8 +11,8 @@ Experimental. rig is useful for local system-configuration workflows, but the CL
 ## Quick Start
 
 ```bash
-# Install (compiles for your host and writes to ~/.local/bin/rig)
-bun install && bun run install:local
+# Install a development binary without replacing production rig
+bun install && bun run install:dev
 
 # Create a config file
 cat > system-config.json << 'EOF'
@@ -80,6 +80,8 @@ bun run install:local
 
 `install:local` compiles a binary for your host platform straight into `~/.local/bin/rig` (and ad-hoc codesigns it on macOS). No separate build step needed.
 
+For day-to-day development, use `bun run install:dev` instead. It compiles the host binary as `.rig-dev/bin/rig-dev-<platform>-<arch>`, links it as `~/.local/bin/rig-dev`, and leaves the production `rig` command untouched.
+
 ### npm Package
 
 The planned npm package is `@skastr0/rig`. It is not published yet.
@@ -102,7 +104,7 @@ bun install --cpu='*' --os='*'
 bun run build
 ```
 
-Use this when you want to upload binaries to a release or copy them to another machine. The extra install command pulls OpenTUI's optional native packages for every target. For installing on the current machine, prefer `bun run install:local`.
+Use this when you want to upload binaries to a release or copy them to another machine. The extra install command pulls OpenTUI's optional native packages for every target. For trying local changes without replacing production `rig`, prefer `bun run install:dev`.
 
 Do not publish packages, create release tags, dispatch release workflows, or flip repository visibility until the gates in `docs/publishing.md` have been completed.
 
@@ -662,6 +664,10 @@ rig --ci --profile macbook --why neovim
 ```bash
 # Run in development mode
 bun run dev -- --ci --profile macbook --dry-run
+
+# Install and smoke the development binary
+bun run install:dev
+rig-dev --help
 
 # Run tests
 bun run test

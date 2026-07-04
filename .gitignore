@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.rig-dev/
 packages/*/bin/rig
 *.log
 .DS_Store

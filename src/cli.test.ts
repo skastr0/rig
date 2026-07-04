@@ -93,7 +93,7 @@ describe("runCli", () => {
     expect(options.apply).toBe(true);
   });
 
-  it("parses --status as a read-only inspection flag", async () => {
+  it("parses --status as a status inspection flag", async () => {
     const options = await parseCli(["bun", "rig", "--status"]);
 
     expect(options.status).toBe(true);
