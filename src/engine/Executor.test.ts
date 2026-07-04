@@ -16,6 +16,7 @@ import { expandPath } from "../utils.js";
 const makeItem = (
   name: string,
   opts?: {
+    check?: string;
     dependsOn?: string[];
     group?: string;
     backup?: string;
@@ -27,7 +28,7 @@ const makeItem = (
   name,
   profiles: ["macbook"],
   tags: ["test"],
-  check: `which ${name}`,
+  check: opts?.check ?? `which ${name}`,
   install: `brew install ${name}`,
   update: opts?.update,
   dependsOn: opts?.dependsOn,
@@ -696,6 +697,151 @@ describe("Executor", () => {
     expect(results[1].error).toContain("a");
     expect(results[2]).toEqual(expect.objectContaining({ name: "c", action: "blocked" }));
     expect(results[2].error).toContain("b");
+  });
+
+  it("fails closed when a check command cannot be executed", async () => {
+    const installCommands: string[] = [];
+    const shell: ShellService = {
+      run: (command) =>
+        command === "broken-check"
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 127,
+                stderr: "sh: missing-check: command not found",
+              }),
+            )
+          : command.startsWith("brew install ")
+            ? Effect.sync(() => {
+                installCommands.push(command);
+                return { stdout: "", stderr: "", exitCode: 0 };
+              })
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([
+        makeItem("a", { check: "broken-check" }),
+        makeItem("b", { dependsOn: ["a"] }),
+      ]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "failed" }));
+    expect(results[0].error).toContain(
+      'Command "broken-check" failed with exit code 127: sh: missing-check: command not found',
+    );
+    expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
+    expect(installCommands).toEqual([]);
+  });
+
+  it("continues to treat ordinary nonzero check results as missing", async () => {
+    const installed = new Set<string>();
+    const shell: ShellService = {
+      run: (command) =>
+        command === "custom-missing-check"
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 1,
+                stderr: "not present",
+              }),
+            )
+          : command === "brew install a"
+            ? Effect.sync(() => {
+                installed.add("a");
+                return { stdout: "installed", stderr: "", exitCode: 0 };
+              })
+            : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([makeItem("a", { check: "custom-missing-check" })]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toEqual(
+      expect.objectContaining({ name: "a", action: "installed", status: "installed" }),
+    );
+    expect(installed.has("a")).toBe(true);
+  });
+
+  it("reports check command execution failures during inspection", async () => {
+    const shell: ShellService = {
+      run: (command) =>
+        command === "broken-check"
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: 127,
+                stderr: "sh: missing-check: command not found",
+              }),
+            )
+          : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+    };
+
+    const plan = await Effect.runPromise(
+      topologicalSort([
+        makeItem("a", { check: "broken-check" }),
+        makeItem("b", { dependsOn: ["a"] }),
+      ]),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(ShellService, shell),
+      Layer.succeed(BackupService, mockBackupService),
+      Layer.succeed(GitService, mockGitService),
+      Layer.succeed(BrewService, mockBrewService),
+      Layer.succeed(FileSystem.FileSystem, mockFileSystem),
+      ExecutorLive,
+    );
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.inspect(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toEqual(expect.objectContaining({ name: "a", status: "error" }));
+    expect(results[0].reason).toContain(
+      'Command "broken-check" failed with exit code 127: sh: missing-check: command not found',
+    );
+    expect(results[1]).toEqual(expect.objectContaining({ name: "b", status: "blocked" }));
+    expect(results[1].reason).toContain("a (error)");
   });
 
   it("marks timed out items separately from generic failures", async () => {

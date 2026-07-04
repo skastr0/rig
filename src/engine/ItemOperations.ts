@@ -143,6 +143,13 @@ const runScriptCommand = (
   });
 };
 
+const checkExecutionFailureExitCodes = new Set([126, 127]);
+
+const isCheckExecutionFailure = (error: ShellError): boolean =>
+  error.timedOut === true ||
+  error.exitCode < 0 ||
+  checkExecutionFailureExitCodes.has(error.exitCode);
+
 const checkGenericItem = (
   item: SystemItem,
   shell: ShellService,
@@ -160,7 +167,9 @@ const checkGenericItem = (
 
   return shell.run(check, toTimeoutOptions(item.timeout)).pipe(
     Effect.map(() => true),
-    Effect.catchAll((error) => (error.timedOut ? Effect.fail(error) : Effect.succeed(false))),
+    Effect.catchAll((error) =>
+      isCheckExecutionFailure(error) ? Effect.fail(error) : Effect.succeed(false),
+    ),
   );
 };
 
