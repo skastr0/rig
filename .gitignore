@@ -11,3 +11,4 @@ system-config.*.json
 beads-issues-backup-*.jsonl
 temp_git_research/
 .cmap/
+.prism/
