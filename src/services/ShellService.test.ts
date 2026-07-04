@@ -64,14 +64,19 @@ describe("ShellServiceLive", () => {
 
   it("treats carriage returns as live line boundaries", async () => {
     const stdoutLines: string[] = [];
+    const stdoutDisplayModes: string[] = [];
 
     await Effect.runPromise(
       runShell("printf 'downloading 10%%\\rdownloading 20%%\\rdone\\n'", {
-        onStdoutLine: (line) => stdoutLines.push(line),
+        onStdoutLine: (line, event) => {
+          stdoutLines.push(line);
+          stdoutDisplayModes.push(event.displayMode);
+        },
       }),
     );
 
     expect(stdoutLines).toEqual(["downloading 10%", "downloading 20%", "done"]);
+    expect(stdoutDisplayModes).toEqual(["replace", "replace", "replace"]);
   });
 
   it("flushes very long newline-free output in bounded line segments", async () => {

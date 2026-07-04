@@ -27,7 +27,15 @@ export interface InteractiveCommandInput {
 export interface PendingLogLine {
   readonly kind: LogKind;
   readonly message: string;
+  readonly label?: string;
   readonly itemName?: string;
+  readonly coalesceKey?: string;
+  readonly displayMode?: "append" | "replace";
+  readonly replaceable?: boolean;
+  readonly resultAction?: ExecutionResult["action"];
+  readonly resultStatus?: ExecutionResult["status"];
+  readonly resultDetail?: string;
+  readonly resultError?: string;
 }
 
 export interface InteractiveRunRequest {
@@ -74,6 +82,10 @@ const emitExecutionResult = (
     kind: result.action === "failed" || result.action === "timed_out" ? "error" : "progress",
     message: formatExecutionResultLog(result),
     itemName: result.name,
+    resultAction: result.action,
+    resultStatus: result.status,
+    ...(result.detail === undefined ? {} : { resultDetail: result.detail }),
+    ...(result.error === undefined ? {} : { resultError: result.error }),
   });
 };
 
@@ -165,8 +177,12 @@ export const executeInteractivePlan = (
       onOutput: (output) =>
         emit({
           kind: "output",
-          message: `[${output.itemName}] ${output.stream}: ${output.line}`,
+          label: `[${output.itemName}] ${output.stream}:`,
+          message: output.line,
           itemName: output.itemName,
+          coalesceKey: `${output.itemName}:${output.stream}`,
+          displayMode: output.displayMode,
+          replaceable: output.terminator === "carriage-return",
         }),
       onVerbose: (message) => emit({ kind: "verbose", message }),
       onProgress: (result) => emitExecutionResult(result, emit),

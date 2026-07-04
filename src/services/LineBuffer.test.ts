@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLineBuffer } from "./LineBuffer.js";
+import { createLineBuffer, type BufferedLineEvent } from "./LineBuffer.js";
 
 const maxBufferedLineLength = 16_384;
 
@@ -53,6 +53,27 @@ describe("createLineBuffer", () => {
     buffer.flush();
 
     expect(lines).toEqual(["downloading 10%", "downloading 20%", "done"]);
+  });
+
+  it("marks carriage-return repaint rows without marking CRLF newlines", () => {
+    const events: { line: string; event: BufferedLineEvent }[] = [];
+    const buffer = createLineBuffer(
+      (line, event) => events.push({ line, event }),
+      (error) => {
+        throw error;
+      },
+    );
+
+    buffer.push("normal\r\n");
+    buffer.push("downloading 10%\rdownloading 20%\rdone\n");
+    buffer.flush();
+
+    expect(events).toEqual([
+      { line: "normal", event: { terminator: "newline", displayMode: "append" } },
+      { line: "downloading 10%", event: { terminator: "carriage-return", displayMode: "replace" } },
+      { line: "downloading 20%", event: { terminator: "carriage-return", displayMode: "replace" } },
+      { line: "done", event: { terminator: "newline", displayMode: "replace" } },
+    ]);
   });
 
   it("routes callback errors without throwing from the buffer", () => {

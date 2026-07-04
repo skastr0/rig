@@ -113,4 +113,68 @@ describe("executeInteractivePlan", () => {
     expect(apply.executeCalled).toBe(true);
     expect(apply.options?.dryRun).toBe(false);
   });
+
+  it("passes command-output repaint metadata through to TUI logs", async () => {
+    const logs: PendingLogLine[] = [];
+    const executor = Executor.of({
+      inspect: () => Effect.succeed([]),
+      execute: (_plan: PlanResult, options?: ExecutorOptions) =>
+        Effect.sync(() => {
+          options?.onOutput?.({
+            itemName: "ripgrep",
+            stream: "stdout",
+            line: "downloading 10%",
+            terminator: "carriage-return",
+            displayMode: "replace",
+          });
+          options?.onOutput?.({
+            itemName: "ripgrep",
+            stream: "stdout",
+            line: "done",
+            terminator: "newline",
+            displayMode: "replace",
+          });
+          return [{ name: "ripgrep", status: "installed", action: "installed" }];
+        }),
+    });
+
+    await Effect.runPromise(
+      executeInteractivePlan(
+        {
+          options: baseOptions,
+          configSource: { _tag: "local", path: "./system-config.json" },
+          items: [makeItem("ripgrep")],
+        },
+        {
+          profile: "macbook",
+          tags: [],
+          only: [],
+          dryRun: false,
+          update: false,
+          verbose: false,
+          apply: true,
+        },
+        (line) => logs.push(line),
+      ).pipe(Effect.provide(Layer.succeed(Executor, executor))),
+    );
+
+    expect(logs).toContainEqual({
+      kind: "output",
+      itemName: "ripgrep",
+      coalesceKey: "ripgrep:stdout",
+      displayMode: "replace",
+      replaceable: true,
+      label: "[ripgrep] stdout:",
+      message: "downloading 10%",
+    });
+    expect(logs).toContainEqual({
+      kind: "output",
+      itemName: "ripgrep",
+      coalesceKey: "ripgrep:stdout",
+      displayMode: "replace",
+      replaceable: false,
+      label: "[ripgrep] stdout:",
+      message: "done",
+    });
+  });
 });

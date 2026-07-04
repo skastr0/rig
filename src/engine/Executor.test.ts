@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Effect, Layer } from "effect";
 import { FileSystem } from "@effect/platform";
 import * as Path from "node:path";
-import { Executor, ExecutorLive, type ExecutionResult } from "./Executor.js";
+import { Executor, ExecutorLive, type ExecutionResult, type ExecutorOptions } from "./Executor.js";
 import { topologicalSort } from "./Planner.js";
 import { ShellService } from "../services/ShellService.js";
 import { createLineBuffer } from "../services/LineBuffer.js";
@@ -1841,8 +1841,14 @@ describe("Executor", () => {
           }
 
           if (command === "tool update") {
-            options?.onStdoutLine?.("Updated active version");
-            options?.onStderrLine?.("warning: extra install skipped");
+            options?.onStdoutLine?.("Updated active version", {
+              terminator: "newline",
+              displayMode: "append",
+            });
+            options?.onStderrLine?.("warning: extra install skipped", {
+              terminator: "newline",
+              displayMode: "append",
+            });
 
             return Effect.succeed({
               stdout: "Updated active version",
@@ -1913,7 +1919,7 @@ describe("Executor", () => {
 
       const items = [makeItem("a", { update: "tool update" })];
       const plan = await Effect.runPromise(topologicalSort(items));
-      const output: { itemName: string; stream: "stdout" | "stderr"; line: string }[] = [];
+      const output: Parameters<NonNullable<ExecutorOptions["onOutput"]>>[0][] = [];
 
       const layer = Layer.mergeAll(
         Layer.succeed(ShellService, shell),
@@ -1939,12 +1945,22 @@ describe("Executor", () => {
         itemName: "a",
         stream: "stdout",
         line: "Installing package",
+        terminator: "newline",
+        displayMode: "append",
       });
-      expect(output).toContainEqual({ itemName: "a", stream: "stdout", line: "Next step" });
+      expect(output).toContainEqual({
+        itemName: "a",
+        stream: "stdout",
+        line: "Next step",
+        terminator: "flush",
+        displayMode: "append",
+      });
       expect(output).toContainEqual({
         itemName: "a",
         stream: "stderr",
         line: "warning: cached formula",
+        terminator: "newline",
+        displayMode: "append",
       });
     });
 

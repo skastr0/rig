@@ -7,6 +7,7 @@ import { GitService } from "../services/GitService.js";
 import { BrewService } from "../services/BrewService.js";
 import { executePlan } from "./ExecutionRunner.js";
 import { inspectPlan } from "./InspectionRunner.js";
+import type { LineDisplayMode, LineTerminator } from "../services/LineBuffer.js";
 
 export type ItemStatus = "installed" | "missing" | "error" | "blocked";
 export type ItemAction =
@@ -37,6 +38,8 @@ interface CommandOutputEvent {
   readonly itemName: string;
   readonly stream: "stdout" | "stderr";
   readonly line: string;
+  readonly terminator: LineTerminator;
+  readonly displayMode: LineDisplayMode;
 }
 
 export type InspectionStatus = "installed" | "missing" | "updateable" | "blocked" | "error";

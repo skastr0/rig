@@ -9,6 +9,7 @@ import type {
 } from "../schema/config.js";
 import type { BrewService } from "../services/BrewService.js";
 import type { GitService } from "../services/GitService.js";
+import type { BufferedLineEvent } from "../services/LineBuffer.js";
 import type { ShellExecutionOptions, ShellResult, ShellService } from "../services/ShellService.js";
 import type { BrewError, FileSystemInstallError, GitError, ShellError } from "../errors.js";
 import { expandPath } from "../utils.js";
@@ -51,13 +52,18 @@ const emitCommandLine = (
   itemName: string,
   stream: "stdout" | "stderr",
   line: string,
+  event: BufferedLineEvent,
   options: ExecutorOptions | undefined,
 ): void => {
   if (line.trim().length === 0) {
     return;
   }
 
-  options?.onOutput?.({ itemName, stream, line });
+  if (options?.onOutput) {
+    options.onOutput({ itemName, stream, line, ...event });
+    return;
+  }
+
   emitVerbose(options, `[${itemName}] ${stream}: ${line}`);
 };
 
@@ -74,8 +80,10 @@ const toCommandOptions = (
   const shellOptions = {
     ...(timeout === undefined ? {} : { timeout }),
     ...(cwd === undefined ? {} : { cwd }),
-    onStdoutLine: (line: string) => emitCommandLine(itemName, "stdout", line, executorOptions),
-    onStderrLine: (line: string) => emitCommandLine(itemName, "stderr", line, executorOptions),
+    onStdoutLine: (line: string, event: BufferedLineEvent) =>
+      emitCommandLine(itemName, "stdout", line, event, executorOptions),
+    onStderrLine: (line: string, event: BufferedLineEvent) =>
+      emitCommandLine(itemName, "stderr", line, event, executorOptions),
   };
 
   return shellOptions;

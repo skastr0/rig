@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { Context, Effect, Layer, Duration } from "effect";
 import { ShellError } from "../errors.js";
-import { createLineBuffer, type LineBuffer } from "./LineBuffer.js";
+import { createLineBuffer, type LineBuffer, type LineEmitter } from "./LineBuffer.js";
 
 export interface ShellResult {
   readonly stdout: string;
@@ -14,8 +14,8 @@ export interface ShellExecutionOptions {
   readonly cwd?: string;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
-  readonly onStdoutLine?: (line: string) => void;
-  readonly onStderrLine?: (line: string) => void;
+  readonly onStdoutLine?: LineEmitter;
+  readonly onStderrLine?: LineEmitter;
 }
 
 export interface ShellService {
