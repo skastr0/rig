@@ -35,9 +35,16 @@ EOF
 # Open the interactive TUI
 rig
 
-# Preview or apply headlessly
+# Preview or apply a profile headlessly
 rig --ci --profile macbook --dry-run
 rig --ci --profile macbook
+
+# Preview one technology slice within that profile
+rig --ci --profile macbook --tags dev --dry-run
+
+# Inspect status and explain selections before installing anything
+rig --ci --profile macbook --status
+rig --ci --profile macbook --why neovim
 
 # Review a remote configuration first (default for HTTPS sources)
 rig --ci --profile macbook https://example.com/system-config.json
@@ -166,6 +173,7 @@ Remote configs are review-first:
 - `rig --apply https://example.com/system-config.json` is the explicit opt-in that enables the TUI run action for a remote config
 - `rig --ci --profile macbook --apply https://example.com/system-config.json` is the headless opt-in
 - `rig --apply gh:owner/repo/path/to/config.json` is the same explicit opt-in after shorthand resolution
+- remote `--status` also requires `--apply` because status mode executes configured check commands
 
 ```bash
 # Review first in the TUI
@@ -536,24 +544,50 @@ Tag filters are evaluated inside the selected profile first, then dependencies a
 
 ### Server-Only Services
 
-Put services that should never install on a daily workstation in a server profile only:
+Put services that should never install on a daily workstation in a server profile only. Keep shared prerequisites on every profile that can depend on them, then put the service-specific installer on the server surface.
 
 ```json
 {
-  "name": "caddy",
-  "profiles": ["server-home"],
-  "tags": ["server", "web"],
-  "check": "which caddy",
-  "install": { "source": "brew", "formula": "caddy" },
-  "group": "brew",
-  "dependsOn": ["homebrew"]
+  "items": [
+    {
+      "name": "homebrew",
+      "profiles": ["macbook", "server-home"],
+      "tags": ["brew", "bootstrap"],
+      "check": "which brew",
+      "install": "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    },
+    {
+      "name": "caddy",
+      "profiles": ["server-home"],
+      "tags": ["server", "web"],
+      "check": "which caddy",
+      "install": { "source": "brew", "formula": "caddy" },
+      "group": "brew",
+      "dependsOn": ["homebrew"]
+    },
+    {
+      "name": "caddy-site",
+      "profiles": ["server-home"],
+      "tags": ["server", "web", "service"],
+      "check": "~/.config/caddy/Caddyfile",
+      "onCheck": "path-exists",
+      "install": {
+        "source": "script",
+        "interpreter": "zsh",
+        "cwd": "~",
+        "script": "set -euo pipefail\nmkdir -p .config/caddy\nprintf ':8080\\nrespond \"ok\"\\n' > .config/caddy/Caddyfile"
+      },
+      "dependsOn": ["caddy"]
+    }
+  ]
 }
 ```
 
-Any dependencies, such as `homebrew` above, must also include `server-home` in their own `profiles` arrays.
+The `server-home` profile prevents both service items from appearing on `macbook`. The `server`, `web`, and `service` tags let you preview or apply a smaller service slice after choosing that profile.
 
 ```bash
 rig --ci --profile server-home --tags server --dry-run
+rig --ci --profile server-home --tags service --only caddy-site --dry-run
 ```
 
 ## CLI Options
@@ -565,12 +599,17 @@ Options:
   -c, --config <source> Path to a local config file or HTTPS config URL (default: ./system-config.json)
   -p, --profile <name>  Profile/topology surface to apply in headless mode
   --ci                  Run non-interactively; requires --profile <name>
+  --init                Create a minimal starter config at the resolved local path and exit
   -d, --dry-run         Show what would be installed without making changes
   --apply               Execute an HTTPS config source after review (remote configs preview by default)
+  --status              Show selected item status without installing or updating items
+  --why <name>          Explain why an item is selected by the active profile and filters
   -t, --tags <tag>      Filter items by tags (can be repeated)
   -o, --only <name>     Install only specific items by name (can be repeated)
   -u, --update          Run update commands and reconcile managed symlinks
   -v, --verbose         Show detailed output
+  --completions <shell> Generate shell completions
+  --log-level <level>   Set the Effect runtime log level
   --help                Show help
   --version             Show version
 ```
@@ -601,7 +640,13 @@ rig --ci --profile macbook --only neovim --only ripgrep
 
 # Install by tags
 rig --ci --profile macbook --tags dev
+
+# Inspect current status or explain one selected item
+rig --ci --profile macbook --status
+rig --ci --profile macbook --why neovim
 ```
+
+`--status` does not install or update items, but it does execute each selected item's configured check command to determine current state. Keep check commands idempotent.
 
 ## How It Works
 

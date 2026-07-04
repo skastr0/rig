@@ -43,6 +43,13 @@ rig
 # See what would be installed in headless mode
 rig --ci --profile macbook --dry-run
 
+# Preview one technology slice within the selected profile
+rig --ci --profile macbook --tags dev --dry-run
+
+# Inspect status and selection reasons before installing anything
+rig --ci --profile macbook --status
+rig --ci --profile macbook --why neovim
+
 # Actually install in headless mode
 rig --ci --profile macbook
 ```
@@ -242,6 +249,8 @@ rig --ci --profile macbook --tags essential
 rig --ci --profile macbook --tags editor
 rig --ci --profile server-home --tags devops
 ```
+
+Tag filters run inside the selected profile. Repeating `--tags` is an OR filter, so `--tags editor --tags devops` selects items that match either tag on that profile, then includes required dependencies that are also available on that profile.
 
 ## Package Manager Examples
 
@@ -763,7 +772,7 @@ rig --ci --profile work --tags essential
 
 ### Server-Only Services
 
-Server services should live outside the workstation profile. Bind them to a server surface and use tags to select the service slice.
+Server services should live outside the workstation profile. Bind shared prerequisites to every surface that can depend on them, bind service installers to a server surface, and use tags to select the service slice.
 
 ```json
 {
@@ -783,6 +792,20 @@ Server services should live outside the workstation profile. Bind them to a serv
       "install": { "source": "brew", "formula": "caddy" },
       "group": "brew",
       "dependsOn": ["homebrew"]
+    },
+    {
+      "name": "caddy-site",
+      "profiles": ["server-home"],
+      "tags": ["server", "web", "service"],
+      "check": "~/.config/caddy/Caddyfile",
+      "onCheck": "path-exists",
+      "install": {
+        "source": "script",
+        "interpreter": "zsh",
+        "cwd": "~",
+        "script": "set -euo pipefail\nmkdir -p .config/caddy\nprintf ':8080\\nrespond \"ok\"\\n' > .config/caddy/Caddyfile"
+      },
+      "dependsOn": ["caddy"]
     }
   ]
 }
@@ -790,7 +813,10 @@ Server services should live outside the workstation profile. Bind them to a serv
 
 ```bash
 rig --ci --profile server-home --tags server --dry-run
+rig --ci --profile server-home --tags service --only caddy-site --dry-run
 ```
+
+The `server-home` profile keeps both Caddy items out of daily workstation runs. The script source keeps multi-step service setup readable in the config and previewable as one script install step.
 
 ## Advanced Patterns
 
@@ -916,6 +942,23 @@ Test a specific item:
 ```bash
 rig --ci --profile macbook --only neovim --dry-run
 ```
+
+To understand why an item is or is not selected, use the selection explanation command:
+
+```bash
+rig --ci --profile macbook --why neovim
+rig --ci --profile macbook --tags editor --why neovim
+```
+
+To inspect installed, missing, blocked, and updateable state without installing or updating items:
+
+```bash
+rig --ci --profile macbook --status
+rig --ci --profile macbook --tags editor --status
+```
+
+Status mode still executes the configured check commands for selected items. Keep checks idempotent and free of setup work.
+For remote HTTPS or GitHub sources, add `--apply` before `--status`; Rig refuses remote status checks until you explicitly trust the config.
 
 ### Common Issues
 

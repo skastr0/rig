@@ -52,15 +52,11 @@ const apply = Options.boolean("apply").pipe(
 );
 
 const status = Options.boolean("status").pipe(
-  Options.withDescription(
-    "Show a read-only status view for selected items (installed, missing, blocked, updateable)",
-  ),
+  Options.withDescription("Show selected item status without installing or updating items"),
 );
 
 const why = Options.optional(Options.text("why")).pipe(
-  Options.withDescription(
-    "Explain why an item is selected under the active profile and filters (read-only)",
-  ),
+  Options.withDescription("Explain why an item is selected under the active profile and filters"),
 );
 
 const tags = Options.withDefault(
@@ -166,7 +162,7 @@ Quick Start:
                                                      # Apply a remote config
   rig --ci --profile macbook --apply gh:user/repo    # Apply a GitHub shorthand config
   rig --ci -p macbook -t dev -t editor               # Install items with dev OR editor tags
-  rig --ci -p macbook --status                       # Inspect current item status without mutating
+  rig --ci -p macbook --status                       # Inspect current item status without installing
   rig --ci -p macbook --why neovim                   # Explain why 'neovim' is selected
   rig --ci -p macbook --update                       # Update installed items
 
