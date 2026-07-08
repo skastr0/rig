@@ -1,6 +1,11 @@
 import { Cause, Effect } from "effect";
 import type { CliOptions } from "./cli.js";
-import { resolveConfigSource } from "./configSource.js";
+import {
+  defaultConfigSource,
+  isRemoteConfigSource,
+  resolveConfiguredSource,
+  resolveConfigSource,
+} from "./configSource.js";
 import { resolveExecutionMode, type ExecutionMode } from "./executionMode.js";
 import { ConfigService } from "./services/ConfigService.js";
 import { topologicalSort, type PlanResult } from "./engine/Planner.js";
@@ -12,7 +17,8 @@ import {
   type SelectionAnalysis,
   type SelectionReason,
 } from "./engine/Selection.js";
-import { ConfigError, ValidationError } from "./errors.js";
+import { configError } from "./configErrors.js";
+import { ValidationError } from "./errors.js";
 import { formatError } from "./errorFormatting.js";
 import type { SystemItem } from "./schema/config.js";
 
@@ -175,14 +181,17 @@ const requireHeadlessProfile = (
 
 const runInitCommand = (options: CliOptions, configService: ConfigService) =>
   Effect.gen(function* () {
-    const configSource = yield* resolveConfigSource(options.config);
+    // --init never walks up: write to explicit path or ./system-config.json in cwd.
+    const initTarget = options.config ?? defaultConfigSource;
+    const configSource = yield* resolveConfigSource(initTarget);
 
     if (configSource._tag !== "local") {
       return yield* Effect.fail(
-        new ConfigError({
+        configError({
+          code: "init_remote_rejected",
           message:
             "Starter config generation only supports local file paths. Pass a local path or omit the config source to use ./system-config.json.",
-          path: options.config,
+          path: initTarget,
         }),
       );
     }
@@ -200,13 +209,13 @@ const loadSelectionContext = (
   reporter: Reporter,
 ) =>
   Effect.gen(function* () {
-    const configSource = yield* resolveConfigSource(options.config);
+    const configSource = yield* resolveConfiguredSource(options.config);
     const readOnlyIntrospection = options.status || options.why !== undefined;
     const executionMode = readOnlyIntrospection
       ? undefined
       : resolveExecutionMode(configSource, options);
     const statusInspectionMode =
-      options.status && configSource._tag === "https"
+      options.status && isRemoteConfigSource(configSource)
         ? resolveExecutionMode(configSource, {
             dryRun: false,
             apply: options.apply,
@@ -215,7 +224,7 @@ const loadSelectionContext = (
 
     reporter.printConfigSource(configSource, executionMode ?? statusInspectionMode);
 
-    if (configSource._tag === "https" && options.status && !options.apply) {
+    if (isRemoteConfigSource(configSource) && options.status && !options.apply) {
       return yield* Effect.fail(
         new ValidationError({
           issues: [
@@ -340,7 +349,7 @@ const runInteractiveCommandIfRequested = (options: CliOptions, configService: Co
       return false;
     }
 
-    const configSource = yield* resolveConfigSource(options.config);
+    const configSource = yield* resolveConfiguredSource(options.config);
     const config = yield* configService.load(configSource);
     const availableProfiles = collectAvailableProfiles(config.items);
 

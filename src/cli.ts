@@ -5,7 +5,8 @@ import { defaultConfigSource, defaultGitHubConfigPath } from "./configSource.js"
 declare const APP_BINARY_NAME: string | undefined;
 
 export interface CliOptions {
-  readonly config: string;
+  /** Explicit config source; undefined triggers walk-up discovery for system-config.json. */
+  readonly config: string | undefined;
   readonly profile: string | undefined;
   readonly ci: boolean;
   readonly init: boolean;
@@ -19,15 +20,15 @@ export interface CliOptions {
   readonly update: boolean;
 }
 
-const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@40-char-commit][/path/to/config.json]; remote sources can append #sha256=digest; bare repos default to ${defaultGitHubConfigPath})`;
+const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@40-char-commit][/path/to/config.json]; remote sources can append #sha256=digest; bare repos default to ${defaultGitHubConfigPath}; private gh: sources use authenticated GitHub CLI when available). When omitted, walk up from the current directory for ${defaultConfigSource}, then try ~/${defaultGitHubConfigPath}`;
 
 const source = Args.text({ name: "config-source" }).pipe(
   Args.optional,
-  Args.withDescription(`${configSourceDescription} (default: ${defaultConfigSource})`),
+  Args.withDescription(configSourceDescription),
 );
 
 const config = Options.optional(Options.text("config").pipe(Options.withAlias("c"))).pipe(
-  Options.withDescription(`${configSourceDescription} (default: ${defaultConfigSource})`),
+  Options.withDescription(configSourceDescription),
 );
 
 const profile = Options.optional(Options.text("profile").pipe(Options.withAlias("p"))).pipe(
@@ -111,7 +112,7 @@ const defaultBinaryName = (): string =>
 const resolveConfigInput = (
   source: Option.Option<string>,
   config: Option.Option<string>,
-): string => {
+): string | undefined => {
   if (Option.isSome(source)) {
     return source.value;
   }
@@ -120,7 +121,7 @@ const resolveConfigInput = (
     return config.value;
   }
 
-  return defaultConfigSource;
+  return undefined;
 };
 
 export const makeCommand = <E, R>(
@@ -149,14 +150,16 @@ export const makeCommand = <E, R>(
 Reads a JSON config source and installs only what's missing. Items are checked
 for existence before installing. Use --dry-run to preview local changes.
 Remote HTTPS configs and GitHub shorthand preview by default and require --apply to execute.
-Bare ${binaryName} opens the interactive TUI. Headless execution requires --ci --profile <name>.
+Private gh:owner/repo sources load via authenticated GitHub CLI (\`gh api\`) when available.
+Bare ${binaryName} walks up from the current directory for ${defaultConfigSource} (then ~/${defaultGitHubConfigPath}) and opens the interactive TUI.
+Headless execution requires --ci --profile <name>.
 
 Quick Start:
   ${binaryName} --init                                         # Create ./system-config.json
   ${binaryName} --init ./work-config.json                      # Create a starter config at a custom path
-  ${binaryName}                                                # Open the interactive TUI
-  ${binaryName} --ci --profile macbook --dry-run               # Preview a local config
-  ${binaryName} --ci --profile macbook                         # Apply ./system-config.json
+  ${binaryName}                                                # Discover config + open the interactive TUI
+  ${binaryName} --ci --profile macbook --dry-run               # Preview a discovered/local config
+  ${binaryName} --ci --profile macbook                         # Apply discovered ${defaultConfigSource}
   ${binaryName} --ci --profile macbook https://example.com/system-config.json
                                                      # Preview a remote config
   ${binaryName} --ci --profile macbook gh:user/repo            # Preview repo-root ${defaultGitHubConfigPath} from GitHub
@@ -166,7 +169,8 @@ Quick Start:
                                                             # Preview with integrity verification
   ${binaryName} --ci --profile macbook --apply https://example.com/system-config.json
                                                      # Apply a remote config
-  ${binaryName} --ci --profile macbook --apply gh:user/repo    # Apply a GitHub shorthand config
+  ${binaryName} --ci --profile macbook --apply gh:user/private-repo
+                                                     # Apply a private GitHub config via gh auth
   ${binaryName} --ci -p macbook -t dev -t editor               # Install items with dev OR editor tags
   ${binaryName} --ci -p macbook --status                       # Inspect current item status without installing
   ${binaryName} --ci -p macbook --why neovim                   # Explain why 'neovim' is selected

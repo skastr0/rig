@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { BunContext } from "@effect/platform-bun";
 import { runCli, type CliOptions } from "./cli.js";
-import { defaultConfigSource } from "./configSource.js";
 
 const parseCli = async (argv: readonly string[]): Promise<CliOptions> => {
   let parsedOptions: CliOptions | undefined;
@@ -21,10 +20,10 @@ const parseCli = async (argv: readonly string[]): Promise<CliOptions> => {
 };
 
 describe("runCli", () => {
-  it("defaults to the local system-config.json path", async () => {
+  it("omits config when none is provided so walk-up discovery can run", async () => {
     const options = await parseCli(["bun", "rig"]);
 
-    expect(options.config).toBe(defaultConfigSource);
+    expect(options.config).toBeUndefined();
     expect(options.ci).toBe(false);
     expect(options.init).toBe(false);
     expect(options.apply).toBe(false);
@@ -34,7 +33,7 @@ describe("runCli", () => {
     const options = await parseCli(["bun", "rig", "--init"]);
 
     expect(options.init).toBe(true);
-    expect(options.config).toBe(defaultConfigSource);
+    expect(options.config).toBeUndefined();
   });
 
   it("parses --init with a custom local target path", async () => {
