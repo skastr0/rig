@@ -110,11 +110,21 @@ Do not publish packages, create release tags, dispatch release workflows, or fli
 
 ## Configuration
 
-Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand. If you do not provide a source, `rig` defaults to `./system-config.json`. Remote sources must use HTTPS, whether you pass the final URL directly or let GitHub shorthand resolve it for you.
+Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand.
+
+If you do not provide a source, `rig` discovers a local config:
+
+1. walk up from the current directory looking for `system-config.json`
+2. if none is found, try `~/system-config.json`
+3. otherwise fail with a clear discovery error
+
+`--init` always writes `./system-config.json` in the current directory (or an explicit local path); it does not walk up.
+
+Remote HTTPS URLs and `gh:` shorthand still require an explicit source argument (or alias). There is no `~/.rig/config` pointer file yet.
 
 ### GitHub shorthand
 
-`rig` supports a narrow GitHub shorthand that resolves into the existing remote HTTPS loader:
+`rig` supports a narrow GitHub shorthand:
 
 - `gh:owner/repo`
 - `gh:owner/repo/path/to/config.json`
@@ -123,21 +133,38 @@ Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand
 
 Resolution is deterministic:
 
-- bare `gh:owner/repo` resolves to `https://raw.githubusercontent.com/owner/repo/HEAD/system-config.json`
-- `gh:owner/repo/path/to/config.json` resolves to `https://raw.githubusercontent.com/owner/repo/HEAD/path/to/config.json`
-- `gh:owner/repo@<40-char-commit>` resolves to `https://raw.githubusercontent.com/owner/repo/<40-char-commit>/system-config.json`
+- bare `gh:owner/repo` targets repository-root `system-config.json` at the default branch (`HEAD` in the raw fallback URL)
+- `gh:owner/repo/path/to/config.json` targets that path
+- `gh:owner/repo@<40-char-commit>` pins an immutable commit
 - pinned refs must be full 40-character Git commit SHAs
-- preview output shows the canonical resolved HTTPS URL so you can review exactly what will be fetched
+- preview output shows the shorthand and the canonical raw HTTPS URL
+
+#### Private repos via GitHub CLI
+
+`gh:` sources prefer the authenticated GitHub CLI:
+
+```bash
+gh auth login   # once
+rig gh:you/private-dotfiles
+rig --apply gh:you/private-dotfiles
+```
+
+Load order for `gh:`:
+
+1. `gh api -H "Accept: application/vnd.github.raw" repos/owner/repo/contents/<path>` (uses your `gh` credentials; works for private repos)
+2. if `gh` is missing or the CLI request fails, fall back to public `raw.githubusercontent.com` HTTPS
+
+Public repos keep working without `gh`. Private repos require `gh` installed and `gh auth login`.
 
 This shorthand is intentionally narrow:
 
 - no mutable branch or tag shorthand such as `@main` or `@v1`
 - no query strings
 - no arbitrary fragments beyond `#sha256=<64 hex characters>`
-- no private repository auth flows
 - no non-GitHub providers
+- no built-in token env / PAT config beyond whatever `gh` already uses
 
-If you need a specific branch or tag, pass the full HTTPS raw URL explicitly. If you want stable repeated runs, prefer a pinned commit SHA.
+If you need a specific branch or tag, pass the full HTTPS raw URL explicitly (public only unless you host auth yourself). If you want stable repeated runs, prefer a pinned commit SHA.
 
 ### Pinning and integrity
 
@@ -598,7 +625,7 @@ rig --ci --profile server-home --tags service --only caddy-site --dry-run
 rig [options] [config-source]
 
 Options:
-  -c, --config <source> Path to a local config file or HTTPS config URL (default: ./system-config.json)
+  -c, --config <source> Local path, HTTPS URL, or gh:owner/repo (omit to walk up for system-config.json, then ~/system-config.json)
   -p, --profile <name>  Profile/topology surface to apply in headless mode
   --ci                  Run non-interactively; requires --profile <name>
   --init                Create a minimal starter config at the resolved local path and exit
