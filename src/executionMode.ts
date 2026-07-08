@@ -1,4 +1,4 @@
-import type { ConfigSource } from "./configSource.js";
+import { isRemoteConfigSource, type ConfigSource } from "./configSource.js";
 
 export type ExecutionMode =
   | {
@@ -28,7 +28,7 @@ export const resolveExecutionMode = (
   source: ConfigSource,
   options: ExecutionModeOptions,
 ): ExecutionMode => {
-  if (source._tag === "https") {
+  if (isRemoteConfigSource(source)) {
     if (options.dryRun || !options.apply) {
       return {
         _tag: "remote_preview",

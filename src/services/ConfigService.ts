@@ -1,16 +1,23 @@
 import { createHash } from "node:crypto";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Either, Layer, Schema } from "effect";
 import { FileSystem } from "@effect/platform";
+import { configError } from "../configErrors.js";
 import {
   configSourceLocation,
+  formatGitHubShorthand,
   formatRemoteConfigIntegrity,
   formatRemoteConfigPin,
+  githubContentsApiEndpoint,
+  isRemoteConfigSource,
   type ConfigSource,
+  type GitHubConfigSource,
   type HttpsConfigSource,
+  type RemoteConfigSource,
 } from "../configSource.js";
 import { ConfigError } from "../errors.js";
 import { SystemConfig, SystemItem } from "../schema/config.js";
 import { renderStarterConfig, starterConfigDocsPath } from "../starterConfig.js";
+import { GitHubCli } from "./GitHubCliService.js";
 
 const remoteConfigTimeoutMs = 10_000;
 
@@ -30,7 +37,7 @@ export interface StarterConfigWriteResult {
 export interface ConfigService {
   readonly load: (
     source: ConfigSource,
-  ) => Effect.Effect<ResolvedConfig, ConfigError, FileSystem.FileSystem>;
+  ) => Effect.Effect<ResolvedConfig, ConfigError, FileSystem.FileSystem | GitHubCli>;
   readonly writeStarterConfig: (
     path: string,
   ) => Effect.Effect<StarterConfigWriteResult, ConfigError, FileSystem.FileSystem>;
@@ -43,27 +50,34 @@ const loadLocalConfigContent = (configPath: string) =>
     const fs = yield* FileSystem.FileSystem;
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.mapError(
-        () =>
-          new ConfigError({
-            message: "Failed to access config file",
-            path: configPath,
-          }),
+      Effect.mapError(() =>
+        configError({
+          code: "access_failed",
+          message: "Failed to access config file",
+          path: configPath,
+        }),
       ),
     );
+
     if (!exists) {
       return yield* Effect.fail(
-        new ConfigError({ message: "Config file not found", path: configPath }),
+        configError({
+          code: "not_found",
+          message: "Config file not found",
+          path: configPath,
+        }),
       );
     }
 
-    return yield* fs
-      .readFileString(configPath)
-      .pipe(
-        Effect.mapError(
-          () => new ConfigError({ message: "Failed to read config file", path: configPath }),
-        ),
-      );
+    return yield* fs.readFileString(configPath).pipe(
+      Effect.mapError(() =>
+        configError({
+          code: "read_failed",
+          message: "Failed to read config file",
+          path: configPath,
+        }),
+      ),
+    );
   });
 
 const rejectExistingLocalConfigTarget = (configPath: string) =>
@@ -71,18 +85,19 @@ const rejectExistingLocalConfigTarget = (configPath: string) =>
     const fs = yield* FileSystem.FileSystem;
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.mapError(
-        () =>
-          new ConfigError({
-            message: "Failed to access config file",
-            path: configPath,
-          }),
+      Effect.mapError(() =>
+        configError({
+          code: "access_failed",
+          message: "Failed to access config file",
+          path: configPath,
+        }),
       ),
     );
 
     if (exists) {
       return yield* Effect.fail(
-        new ConfigError({
+        configError({
+          code: "already_exists",
           message:
             "Config file already exists. Choose a different path or edit the existing file instead of re-running --init.",
           path: configPath,
@@ -96,64 +111,66 @@ const writeStarterConfigContent = (configPath: string, content: string) =>
     const fs = yield* FileSystem.FileSystem;
 
     yield* fs.writeFileString(configPath, content).pipe(
-      Effect.mapError(
-        () =>
-          new ConfigError({
-            message: "Failed to write starter config file",
-            path: configPath,
-          }),
+      Effect.mapError(() =>
+        configError({
+          code: "write_failed",
+          message: "Failed to write starter config file",
+          path: configPath,
+        }),
       ),
     );
   });
 
-const toRemoteConfigError = (url: string, error: unknown): ConfigError => {
+const mapRemoteFetchFailure = (url: string, error: unknown): ConfigError => {
   if (error instanceof ConfigError) {
     return error;
   }
 
   if (error instanceof Error && error.name === "AbortError") {
-    return new ConfigError({
+    return configError({
+      code: "remote_timeout",
       message: `Remote config request timed out after ${remoteConfigTimeoutMs}ms`,
       path: url,
     });
   }
 
-  return new ConfigError({
+  return configError({
+    code: "remote_fetch_failed",
     message: `Failed to fetch remote config: ${error instanceof Error ? error.message : String(error)}`,
     path: url,
   });
 };
 
-const pinnedRemoteStatusError = (
-  source: HttpsConfigSource,
-  pin: NonNullable<HttpsConfigSource["pin"]>,
-  observedStatus: string,
-): ConfigError =>
-  new ConfigError({
-    message: `Pinned remote config could not be resolved: expected ${formatRemoteConfigPin(pin)}, observed ${observedStatus}`,
-    path: source.url,
-  });
-
-const verifyRemoteConfigIntegrity = (source: HttpsConfigSource, content: string): void => {
+const verifyRemoteConfigIntegrity = (
+  source: RemoteConfigSource,
+  content: string,
+): Effect.Effect<void, ConfigError> => {
   if (!source.integrity) {
-    return;
+    return Effect.void;
   }
 
   const observedDigest = sha256Digest(content);
   const observedIntegrity = `sha256:${observedDigest}`;
 
-  if (observedDigest !== source.integrity.expected) {
-    throw new ConfigError({
-      message: `Remote config integrity mismatch: expected ${formatRemoteConfigIntegrity(source.integrity)}, observed ${observedIntegrity}`,
-      path: source.url,
-    });
+  if (observedDigest === source.integrity.expected) {
+    return Effect.void;
   }
+
+  return Effect.fail(
+    configError({
+      code: "integrity_mismatch",
+      message: `Remote config integrity mismatch: expected ${formatRemoteConfigIntegrity(source.integrity)}, observed ${observedIntegrity}`,
+      path: configSourceLocation(source),
+    }),
+  );
 };
 
-const loadRemoteConfigContent = (source: HttpsConfigSource) =>
+const loadHttpsConfigContent = (source: HttpsConfigSource): Effect.Effect<string, ConfigError> =>
   Effect.tryPromise({
-    try: async () => {
+    try: async (signal) => {
       const controller = new AbortController();
+      const onAbort = () => controller.abort();
+      signal.addEventListener("abort", onAbort, { once: true });
       const timeoutId = setTimeout(() => controller.abort(), remoteConfigTimeoutMs);
 
       try {
@@ -163,44 +180,104 @@ const loadRemoteConfigContent = (source: HttpsConfigSource) =>
           const statusText = response.statusText ? ` ${response.statusText}` : "";
           const observedStatus = `HTTP ${response.status}${statusText}`;
 
-          throw source.pin
-            ? pinnedRemoteStatusError(source, source.pin, observedStatus)
-            : new ConfigError({
-                message: `Failed to fetch remote config: ${observedStatus}`,
-                path: source.url,
-              });
+          if (source.pin) {
+            throw configError({
+              code: "remote_pin_unresolved",
+              message: `Pinned remote config could not be resolved: expected ${formatRemoteConfigPin(source.pin)}, observed ${observedStatus}`,
+              path: source.url,
+            });
+          }
+
+          throw configError({
+            code: "remote_fetch_failed",
+            message: `Failed to fetch remote config: ${observedStatus}`,
+            path: source.url,
+          });
         }
 
-        const content = await response.text();
-
-        verifyRemoteConfigIntegrity(source, content);
-
-        return content;
+        return await response.text();
       } finally {
         clearTimeout(timeoutId);
+        signal.removeEventListener("abort", onAbort);
       }
     },
-    catch: (error) => toRemoteConfigError(source.url, error),
+    catch: (error) => mapRemoteFetchFailure(source.url, error),
+  }).pipe(
+    Effect.flatMap((content) =>
+      verifyRemoteConfigIntegrity(source, content).pipe(Effect.as(content)),
+    ),
+  );
+
+const loadGitHubConfigContent = (
+  source: GitHubConfigSource,
+): Effect.Effect<string, ConfigError, GitHubCli> =>
+  Effect.gen(function* () {
+    const gh = yield* GitHubCli;
+    const endpoint = githubContentsApiEndpoint(source);
+    const cliResult = yield* gh
+      .rawContents(endpoint, { timeoutMs: remoteConfigTimeoutMs })
+      .pipe(Effect.either);
+
+    if (Either.isRight(cliResult)) {
+      yield* verifyRemoteConfigIntegrity(source, cliResult.right);
+      return cliResult.right;
+    }
+
+    const cliError = cliResult.left;
+
+    // Fall back to public raw.githubusercontent.com (works without gh for public repos).
+    const rawResult = yield* loadHttpsConfigContent({
+      _tag: "https",
+      url: source.rawUrl,
+      ...(source.integrity ? { integrity: source.integrity } : {}),
+      ...(source.pin ? { pin: source.pin } : {}),
+    }).pipe(Effect.either);
+
+    if (Either.isRight(rawResult)) {
+      return rawResult.right;
+    }
+
+    const rawError = rawResult.left;
+    const shorthand = formatGitHubShorthand(source);
+
+    return yield* Effect.fail(
+      configError({
+        code: "github_load_failed",
+        message: `Failed to load GitHub config ${shorthand}. ${cliError.message} Raw HTTPS fallback also failed: ${rawError.message}. For private repositories, install GitHub CLI and run \`gh auth login\`.`,
+        path: source.rawUrl,
+      }),
+    );
   });
+
+const loadRemoteConfigContent = (
+  source: RemoteConfigSource,
+): Effect.Effect<string, ConfigError, GitHubCli> =>
+  source._tag === "github" ? loadGitHubConfigContent(source) : loadHttpsConfigContent(source);
 
 const decodeConfig = (content: string, source: ConfigSource) =>
   Effect.gen(function* () {
     const sourceLocation = configSourceLocation(source);
-    const invalidJsonMessage =
-      source._tag === "https" ? "Invalid JSON in remote config" : "Invalid JSON";
+    const invalidJsonMessage = isRemoteConfigSource(source)
+      ? "Invalid JSON in remote config"
+      : "Invalid JSON";
 
     const parsed = yield* Effect.try({
       try: () => JSON.parse(content) as unknown,
-      catch: () => new ConfigError({ message: invalidJsonMessage, path: sourceLocation }),
+      catch: () =>
+        configError({
+          code: "invalid_json",
+          message: invalidJsonMessage,
+          path: sourceLocation,
+        }),
     });
 
     const config = yield* Schema.decodeUnknown(SystemConfig)(parsed).pipe(
-      Effect.mapError(
-        (error) =>
-          new ConfigError({
-            message: `Schema validation failed: ${error.message}`,
-            path: sourceLocation,
-          }),
+      Effect.mapError((error) =>
+        configError({
+          code: "schema_invalid",
+          message: `Schema validation failed: ${error.message}`,
+          path: sourceLocation,
+        }),
       ),
     );
 
@@ -307,7 +384,8 @@ const validateConfig = (
   return issues.length === 0
     ? Effect.void
     : Effect.fail(
-        new ConfigError({
+        configError({
+          code: "validation_failed",
           message: `Config validation failed:\n- ${issues.join("\n- ")}`,
           path: sourceLocation,
         }),
@@ -319,7 +397,7 @@ export const ConfigServiceLive = Layer.succeed(
   ConfigService.of({
     load: (source) =>
       Effect.gen(function* () {
-        const content = yield* source._tag === "https"
+        const content = yield* isRemoteConfigSource(source)
           ? loadRemoteConfigContent(source)
           : loadLocalConfigContent(source.path);
 

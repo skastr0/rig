@@ -24,6 +24,26 @@ describe("resolveExecutionMode", () => {
     });
   });
 
+  it("treats GitHub shorthand sources as remote for trust mode", () => {
+    expect(
+      resolveExecutionMode(
+        {
+          _tag: "github",
+          owner: "owner",
+          repo: "repo",
+          path: "system-config.json",
+          ref: "HEAD",
+          rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/system-config.json",
+        },
+        { dryRun: false, apply: false },
+      ),
+    ).toEqual({
+      _tag: "remote_preview",
+      dryRun: true,
+      applyRequested: false,
+    });
+  });
+
   it("allows remote configs to apply only when --apply is present", () => {
     expect(
       resolveExecutionMode(

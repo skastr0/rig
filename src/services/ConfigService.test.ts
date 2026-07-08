@@ -6,6 +6,12 @@ import { ConfigService, ConfigServiceLive } from "./ConfigService.js";
 import type { ConfigSource } from "../configSource.js";
 import { ConfigError } from "../errors.js";
 import { renderStarterConfig } from "../starterConfig.js";
+import {
+  GitHubCli,
+  GitHubCliTest,
+  GitHubCliUnavailableLive,
+  type GitHubCliService,
+} from "./GitHubCliService.js";
 
 const pinnedCommit = "0123456789abcdef0123456789abcdef01234567";
 const malformedPinnedCommit = "not-a-40-char-commit";
@@ -45,7 +51,11 @@ const createMockFileSystem = (seedFiles: Record<string, string> = {}): MockFileS
   } as unknown as MockFileSystem;
 };
 
-const loadConfig = (source: ConfigSource, files: Record<string, string> = {}) =>
+const loadConfig = (
+  source: ConfigSource,
+  files: Record<string, string> = {},
+  githubCliLayer: Layer.Layer<GitHubCli> = GitHubCliUnavailableLive,
+) =>
   Effect.gen(function* () {
     const configService = yield* ConfigService;
     return yield* configService.load(source);
@@ -54,6 +64,7 @@ const loadConfig = (source: ConfigSource, files: Record<string, string> = {}) =>
       Layer.mergeAll(
         Layer.succeed(FileSystem.FileSystem, createMockFileSystem(files)),
         ConfigServiceLive,
+        githubCliLayer,
       ),
     ),
   );
@@ -115,7 +126,11 @@ describe("ConfigService", () => {
         return yield* configService.writeStarterConfig("./system-config.json");
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(Layer.succeed(FileSystem.FileSystem, fileSystem), ConfigServiceLive),
+          Layer.mergeAll(
+            Layer.succeed(FileSystem.FileSystem, fileSystem),
+            ConfigServiceLive,
+            GitHubCliUnavailableLive,
+          ),
         ),
       ),
     );
@@ -139,7 +154,11 @@ describe("ConfigService", () => {
         return yield* configService.load({ _tag: "local", path: "./system-config.json" });
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(Layer.succeed(FileSystem.FileSystem, fileSystem), ConfigServiceLive),
+          Layer.mergeAll(
+            Layer.succeed(FileSystem.FileSystem, fileSystem),
+            ConfigServiceLive,
+            GitHubCliUnavailableLive,
+          ),
         ),
       ),
     );
@@ -171,6 +190,7 @@ describe("ConfigService", () => {
               }),
             ),
             ConfigServiceLive,
+            GitHubCliUnavailableLive,
           ),
         ),
       ),
@@ -202,6 +222,133 @@ describe("ConfigService", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(result.items).toEqual([configItem("ripgrep", "which rg", "brew install ripgrep")]);
+  });
+
+  it("loads private GitHub shorthand sources via authenticated gh api", async () => {
+    const remoteConfig = JSON.stringify({
+      items: [configItem("ripgrep", "which rg", "brew install ripgrep")],
+    });
+    const endpoints: string[] = [];
+    const githubCli: GitHubCliService = {
+      rawContents: (endpoint) =>
+        Effect.sync(() => {
+          endpoints.push(endpoint);
+          return remoteConfig;
+        }),
+    };
+
+    const result = await Effect.runPromise(
+      loadConfig(
+        {
+          _tag: "github",
+          owner: "owner",
+          repo: "private-dotfiles",
+          path: "system-config.json",
+          ref: "HEAD",
+          rawUrl:
+            "https://raw.githubusercontent.com/owner/private-dotfiles/HEAD/system-config.json",
+        },
+        {},
+        GitHubCliTest(githubCli),
+      ),
+    );
+
+    expect(endpoints).toEqual(["repos/owner/private-dotfiles/contents/system-config.json"]);
+    expect(result.items).toEqual([configItem("ripgrep", "which rg", "brew install ripgrep")]);
+  });
+
+  it("falls back to raw HTTPS when gh is unavailable for public GitHub sources", async () => {
+    const remoteConfig = JSON.stringify({
+      items: [configItem("fd", "which fd", "brew install fd")],
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(remoteConfig, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await Effect.runPromise(
+      loadConfig(
+        {
+          _tag: "github",
+          owner: "owner",
+          repo: "public-dotfiles",
+          path: "system-config.json",
+          ref: "HEAD",
+          rawUrl: "https://raw.githubusercontent.com/owner/public-dotfiles/HEAD/system-config.json",
+        },
+        {},
+        GitHubCliUnavailableLive,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/public-dotfiles/HEAD/system-config.json",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(result.items).toEqual([configItem("fd", "which fd", "brew install fd")]);
+  });
+
+  it("fails closed on integrity mismatch after a successful gh load without raw fallback", async () => {
+    const remoteConfig = JSON.stringify({
+      items: [configItem("ripgrep", "which rg", "brew install ripgrep")],
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expectConfigError(
+      loadConfig(
+        {
+          _tag: "github",
+          owner: "owner",
+          repo: "private-dotfiles",
+          path: "system-config.json",
+          ref: "HEAD",
+          rawUrl:
+            "https://raw.githubusercontent.com/owner/private-dotfiles/HEAD/system-config.json",
+          integrity: {
+            algorithm: "sha256",
+            expected: "0".repeat(64),
+          },
+        },
+        {},
+        GitHubCliTest({
+          rawContents: () => Effect.succeed(remoteConfig),
+        }),
+      ),
+      (error) => {
+        expect(error.code).toBe("integrity_mismatch");
+        expect(error.message).toContain("Remote config integrity mismatch");
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("composes github_load_failed when both gh and raw HTTPS fail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(new Response("Not Found", { status: 404, statusText: "Not Found" })),
+    );
+
+    await expectConfigError(
+      loadConfig(
+        {
+          _tag: "github",
+          owner: "owner",
+          repo: "private-dotfiles",
+          path: "system-config.json",
+          ref: "HEAD",
+          rawUrl:
+            "https://raw.githubusercontent.com/owner/private-dotfiles/HEAD/system-config.json",
+        },
+        {},
+        GitHubCliUnavailableLive,
+      ),
+      (error) => {
+        expect(error.code).toBe("github_load_failed");
+        expect(error.message).toContain("gh auth login");
+        expect(error.message).toContain("Raw HTTPS fallback also failed");
+      },
+    );
   });
 
   it("loads pinned remote configs and verifies integrity when requested", async () => {

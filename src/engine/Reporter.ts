@@ -199,8 +199,14 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
   const printConfigSource = (source: ConfigSource, executionMode?: ExecutionMode) => {
     console.log(`\n${c.bold}Config Source:${c.reset} ${formatConfigSource(source)}\n`);
 
-    if (source._tag !== "https") {
+    if (source._tag !== "https" && source._tag !== "github") {
       return;
+    }
+
+    if (source._tag === "github") {
+      console.log(
+        `  ${c.cyan}${symbols.arrow}${c.reset} GitHub transport: authenticated \`gh api\` when available, else public raw HTTPS`,
+      );
     }
 
     if (source.pin) {

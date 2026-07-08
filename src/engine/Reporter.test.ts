@@ -48,7 +48,7 @@ describe("Reporter", () => {
       ).toBe(true);
     });
 
-    it("should show the canonical raw GitHub URL for shorthand sources", async () => {
+    it("should show GitHub shorthand and the canonical raw URL for gh: sources", async () => {
       const reporter = createReporter({ noColor: true });
       const source = await Effect.runPromise(
         resolveConfigSource("gh:guilhermecastro/rig/configs/work.json"),
@@ -59,10 +59,11 @@ describe("Reporter", () => {
       expect(
         output.some((line) =>
           line.includes(
-            "remote HTTPS https://raw.githubusercontent.com/guilhermecastro/rig/HEAD/configs/work.json",
+            "remote GitHub gh:guilhermecastro/rig/configs/work.json (https://raw.githubusercontent.com/guilhermecastro/rig/HEAD/configs/work.json)",
           ),
         ),
       ).toBe(true);
+      expect(output.some((line) => line.includes("authenticated `gh api`"))).toBe(true);
     });
 
     it("should explain that remote configs preview by default", () => {

@@ -1,5 +1,5 @@
 import type { CliOptions } from "../cli.js";
-import type { ConfigSource } from "../configSource.js";
+import { isRemoteConfigSource, type ConfigSource } from "../configSource.js";
 
 export const getRunDisabledReason = (
   configSource: ConfigSource,
@@ -9,7 +9,7 @@ export const getRunDisabledReason = (
     return "--dry-run is active";
   }
 
-  if (configSource._tag === "https" && !options.apply) {
+  if (isRemoteConfigSource(configSource) && !options.apply) {
     return "remote source requires --apply";
   }
 
