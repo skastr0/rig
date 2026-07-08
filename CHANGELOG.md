@@ -8,6 +8,20 @@ The project follows Semantic Versioning for the declared public CLI and package 
 
 No unreleased changes.
 
+## [0.1.2] - 2026-07-08
+
+### Added
+
+- Private GitHub config loading via authenticated `gh api`, with public raw HTTPS fallback.
+- Walk-up discovery for `system-config.json`, then `~/system-config.json`.
+- User default source from `~/.rig/config.json` (`defaultSource` path, HTTPS URL, or `gh:owner/repo`).
+- Structured `ConfigError` domain codes for config resolution and load failures.
+
+### Changed
+
+- Bare invocations prefer `~/.rig/config.json` `defaultSource` before local walk-up discovery.
+- GitHub shorthand is a first-class `github` config source with review-first remote trust.
+
 ## [0.1.1] - 2026-06-04
 
 ### Fixed

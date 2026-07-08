@@ -1,6 +1,6 @@
 {
   "name": "@skastr0/rig",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Declarative, idempotent system configuration CLI for macOS and Linux.",
   "keywords": [
     "bun",
@@ -73,10 +73,10 @@
     "vitest": "^4.1.7"
   },
   "optionalDependencies": {
-    "@skastr0/rig-darwin-arm64": "0.1.1",
-    "@skastr0/rig-darwin-x64": "0.1.1",
-    "@skastr0/rig-linux-arm64": "0.1.1",
-    "@skastr0/rig-linux-x64": "0.1.1"
+    "@skastr0/rig-darwin-arm64": "0.1.2",
+    "@skastr0/rig-darwin-x64": "0.1.2",
+    "@skastr0/rig-linux-arm64": "0.1.2",
+    "@skastr0/rig-linux-x64": "0.1.2"
   },
   "overrides": {
     "picomatch": "2.3.2",
