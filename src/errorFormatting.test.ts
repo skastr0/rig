@@ -14,6 +14,18 @@ describe("formatError", () => {
     );
   });
 
+  it("formats config errors with a domain code when present", () => {
+    const error = new ConfigError({
+      message: "Config file not found",
+      path: "./system-config.json",
+      code: "not_found",
+    });
+
+    expect(formatError(error)).toBe(
+      "Configuration error: Config file not found (./system-config.json) [not_found]",
+    );
+  });
+
   it("formats validation errors as a multi-line issue list", () => {
     const error = new ValidationError({
       issues: ["Missing item name", "Invalid dependency"],

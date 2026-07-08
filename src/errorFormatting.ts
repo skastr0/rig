@@ -31,7 +31,8 @@ const formatCommandContext = (error: {
 const errorFormatters = [
   errorFormatter(
     (error): error is ConfigError => error instanceof ConfigError,
-    (error) => `Configuration error: ${error.message}${error.path ? ` (${error.path})` : ""}`,
+    (error) =>
+      `Configuration error: ${error.message}${error.path ? ` (${error.path})` : ""}${error.code ? ` [${error.code}]` : ""}`,
   ),
   errorFormatter(
     (error): error is ValidationError => error instanceof ValidationError,

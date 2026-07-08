@@ -1,8 +1,11 @@
 import { Data } from "effect";
+import type { ConfigErrorCode } from "./configErrors.js";
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{
   readonly message: string;
   readonly path?: string;
+  /** Stable machine-facing domain code; optional for backward-compatible call sites. */
+  readonly code?: ConfigErrorCode;
 }> {}
 
 export class ShellError extends Data.TaggedError("ShellError")<{

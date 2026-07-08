@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { configError } from "./configErrors.js";
 import { ConfigError } from "./errors.js";
 import { SystemConfig } from "./schema/config.js";
 
@@ -18,7 +19,8 @@ const canonicalStarterConfig = {
 } satisfies Schema.Schema.Type<typeof SystemConfig>;
 
 const toStarterConfigError = (error: unknown): ConfigError =>
-  new ConfigError({
+  configError({
+    code: "schema_invalid",
     message: `Starter config schema validation failed: ${error instanceof Error ? error.message : String(error)}`,
   });
 
