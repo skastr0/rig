@@ -6,7 +6,10 @@ import {
   defaultConfigFileName,
   defaultGitHubConfigPath,
   discoverDefaultConfigSource,
+  loadUserDefaultSource,
   resolveConfigSource,
+  resolveConfiguredSource,
+  userConfigPath,
 } from "./configSource.js";
 import { ConfigError } from "./errors.js";
 
@@ -38,9 +41,18 @@ const expectConfigError = async (sourceInput: string): Promise<ConfigError> => {
   return exit.cause.error;
 };
 
-const createMockFileSystem = (existingPaths: ReadonlySet<string>) =>
+const createMockFileSystem = (
+  existingPaths: ReadonlySet<string>,
+  files: Record<string, string> = {},
+) =>
   ({
     exists: (path: string) => Effect.succeed(existingPaths.has(path)),
+    readFileString: (path: string) => {
+      const content = files[path];
+      return content === undefined
+        ? Effect.fail(new Error(`Missing file: ${path}`))
+        : Effect.succeed(content);
+    },
   }) as unknown as FileSystem.FileSystem;
 
 const runDiscovery = (startDir: string, homeDir: string, existingPaths: readonly string[]) =>
@@ -254,9 +266,58 @@ describe("discoverDefaultConfigSource", () => {
       throw new Error("Expected ConfigError");
     }
 
-    expect(exit.cause.error.message).toContain("Walked up from");
+    expect(exit.cause.error.message).toContain("walked up from");
     expect(exit.cause.error.message).toContain(defaultConfigFileName);
     expect(exit.cause.error.message).toContain(Path.join("/Users/demo", defaultConfigFileName));
+    expect(exit.cause.error.message).toContain(userConfigPath("/Users/demo"));
     expect(exit.cause.error.code).toBe("discovery_failed");
+  });
+});
+
+describe("user config defaultSource", () => {
+  it("loads defaultSource from ~/.rig/config.json", async () => {
+    const homeDir = "/Users/demo";
+    const path = userConfigPath(homeDir);
+
+    await expect(
+      Effect.runPromise(
+        loadUserDefaultSource(homeDir).pipe(
+          Effect.provide(
+            Layer.succeed(
+              FileSystem.FileSystem,
+              createMockFileSystem(new Set([path]), {
+                [path]: JSON.stringify({ defaultSource: "gh:skastr0/rig-system-config" }),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ).resolves.toBe("gh:skastr0/rig-system-config");
+  });
+
+  it("prefers user defaultSource over walk-up discovery", async () => {
+    const homeDir = "/Users/demo";
+    const path = userConfigPath(homeDir);
+    const localConfig = Path.join("/tmp/work", defaultConfigFileName);
+
+    await expect(
+      Effect.runPromise(
+        resolveConfiguredSource(undefined, homeDir).pipe(
+          Effect.provide(
+            Layer.succeed(
+              FileSystem.FileSystem,
+              createMockFileSystem(new Set([path, localConfig]), {
+                [path]: JSON.stringify({ defaultSource: "gh:skastr0/rig-system-config" }),
+                [localConfig]: "{}",
+              }),
+            ),
+          ),
+        ),
+      ),
+    ).resolves.toMatchObject({
+      _tag: "github",
+      owner: "skastr0",
+      repo: "rig-system-config",
+    });
   });
 });

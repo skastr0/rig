@@ -20,7 +20,7 @@ export interface CliOptions {
   readonly update: boolean;
 }
 
-const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@40-char-commit][/path/to/config.json]; remote sources can append #sha256=digest; bare repos default to ${defaultGitHubConfigPath}; private gh: sources use authenticated GitHub CLI when available). When omitted, walk up from the current directory for ${defaultConfigSource}, then try ~/${defaultGitHubConfigPath}`;
+const configSourceDescription = `Config source path, HTTPS URL, or GitHub shorthand (gh:owner/repo[@40-char-commit][/path/to/config.json]; remote sources can append #sha256=digest; bare repos default to ${defaultGitHubConfigPath}; private gh: sources use authenticated GitHub CLI when available). When omitted, use ~/.rig/config.json defaultSource if set, otherwise walk up for ${defaultConfigSource}, then try ~/${defaultGitHubConfigPath}`;
 
 const source = Args.text({ name: "config-source" }).pipe(
   Args.optional,
@@ -151,7 +151,7 @@ Reads a JSON config source and installs only what's missing. Items are checked
 for existence before installing. Use --dry-run to preview local changes.
 Remote HTTPS configs and GitHub shorthand preview by default and require --apply to execute.
 Private gh:owner/repo sources load via authenticated GitHub CLI (\`gh api\`) when available.
-Bare ${binaryName} walks up from the current directory for ${defaultConfigSource} (then ~/${defaultGitHubConfigPath}) and opens the interactive TUI.
+Bare ${binaryName} uses ~/.rig/config.json defaultSource when set, otherwise walks up for ${defaultConfigSource} (then ~/${defaultGitHubConfigPath}), and opens the interactive TUI.
 Headless execution requires --ci --profile <name>.
 
 Quick Start:

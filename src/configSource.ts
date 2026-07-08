@@ -9,6 +9,8 @@ export const defaultConfigFileName = "system-config.json";
 export const defaultConfigSource = `./${defaultConfigFileName}`;
 export const defaultGitHubConfigPath = defaultConfigFileName;
 export const defaultGitHubConfigRef = "HEAD";
+export const userConfigDirectoryName = ".rig";
+export const userConfigFileName = "config.json";
 
 const lowerHex = (value: string): string => value.toLowerCase();
 
@@ -342,8 +344,61 @@ const fileExists = (path: string): Effect.Effect<boolean, ConfigError, FileSyste
     );
   });
 
+const UserConfigSchema = Schema.Struct({
+  defaultSource: Schema.String.pipe(Schema.nonEmptyString()),
+});
+
+export const userConfigPath = (homeDir: string = Os.homedir()): string =>
+  Path.join(homeDir, userConfigDirectoryName, userConfigFileName);
+
 /**
- * Discover the default local config when the user omits a source.
+ * Read ~/.rig/config.json when present.
+ * Returns undefined when the file is missing so callers can fall back to walk-up discovery.
+ */
+export const loadUserDefaultSource = Effect.fn("loadUserDefaultSource")(function* (
+  homeDir: string = Os.homedir(),
+) {
+  const path = userConfigPath(homeDir);
+  if (!(yield* fileExists(path))) {
+    return undefined;
+  }
+
+  const fs = yield* FileSystem.FileSystem;
+  const content = yield* fs.readFileString(path).pipe(
+    Effect.mapError(() =>
+      configError({
+        code: "read_failed",
+        message: "Failed to read user config file",
+        path,
+      }),
+    ),
+  );
+
+  const parsed = yield* Effect.try({
+    try: () => JSON.parse(content) as unknown,
+    catch: () =>
+      configError({
+        code: "user_config_invalid",
+        message: "Invalid JSON in user config file",
+        path,
+      }),
+  });
+
+  const userConfig = yield* Schema.decodeUnknown(UserConfigSchema)(parsed).pipe(
+    Effect.mapError((error) =>
+      configError({
+        code: "user_config_invalid",
+        message: `User config schema validation failed: ${error.message}. Expected { "defaultSource": "<path|https URL|gh:owner/repo>" }.`,
+        path,
+      }),
+    ),
+  );
+
+  return userConfig.defaultSource;
+});
+
+/**
+ * Discover the default local config when the user omits a source and has no user default.
  * Walks from startDir to filesystem root for system-config.json, then tries ~/system-config.json.
  */
 export const discoverDefaultConfigSource = Effect.fn("discoverDefaultConfigSource")(function* (
@@ -377,16 +432,32 @@ export const discoverDefaultConfigSource = Effect.fn("discoverDefaultConfigSourc
   return yield* Effect.fail(
     configError({
       code: "discovery_failed",
-      message: `Config file not found. Walked up from ${resolvedStart} looking for ${defaultConfigFileName}, then checked ${homeCandidate}. Pass an explicit path, HTTPS URL, or gh:owner/repo source.`,
+      message: `Config file not found. Checked ${userConfigPath(resolvedHome)} for defaultSource, walked up from ${resolvedStart} looking for ${defaultConfigFileName}, then checked ${homeCandidate}. Pass an explicit path, HTTPS URL, or gh:owner/repo source.`,
       path: defaultConfigSource,
     }),
   );
 });
 
+/**
+ * Resolve the effective config source.
+ * Explicit CLI/path wins; otherwise ~/.rig/config.json defaultSource; otherwise walk-up/home discovery.
+ */
 export const resolveConfiguredSource = (
   sourceInput: string | undefined,
+  homeDir: string = Os.homedir(),
 ): Effect.Effect<ConfigSource, ConfigError, FileSystem.FileSystem> =>
-  sourceInput === undefined ? discoverDefaultConfigSource() : resolveConfigSource(sourceInput);
+  Effect.gen(function* () {
+    if (sourceInput !== undefined) {
+      return yield* resolveConfigSource(sourceInput);
+    }
+
+    const userDefault = yield* loadUserDefaultSource(homeDir);
+    if (userDefault !== undefined) {
+      return yield* resolveConfigSource(userDefault);
+    }
+
+    return yield* discoverDefaultConfigSource(process.cwd(), homeDir);
+  });
 
 export const configSourceLocation = (source: ConfigSource): string => {
   switch (source._tag) {

@@ -24,6 +24,7 @@ export type ConfigErrorCode =
   | "schema_invalid"
   | "validation_failed"
   | "discovery_failed"
+  | "user_config_invalid"
   | "init_remote_rejected";
 
 export const configError = (input: {

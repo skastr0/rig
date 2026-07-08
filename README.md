@@ -112,15 +112,22 @@ Do not publish packages, create release tags, dispatch release workflows, or fli
 
 Configuration can come from a local JSON file, an HTTPS URL, or GitHub shorthand.
 
-If you do not provide a source, `rig` discovers a local config:
+If you do not provide a source, `rig` resolves a default in this order:
 
-1. walk up from the current directory looking for `system-config.json`
-2. if none is found, try `~/system-config.json`
-3. otherwise fail with a clear discovery error
+1. `~/.rig/config.json` → `defaultSource` (path, HTTPS URL, or `gh:owner/repo`)
+2. walk up from the current directory looking for `system-config.json`
+3. if none is found, try `~/system-config.json`
+4. otherwise fail with a clear discovery error
 
-`--init` always writes `./system-config.json` in the current directory (or an explicit local path); it does not walk up.
+Example user config:
 
-Remote HTTPS URLs and `gh:` shorthand still require an explicit source argument (or alias). There is no `~/.rig/config` pointer file yet.
+```json
+{
+  "defaultSource": "gh:you/private-system-config"
+}
+```
+
+`--init` always writes `./system-config.json` in the current directory (or an explicit local path); it does not walk up or read `~/.rig/config.json`.
 
 ### GitHub shorthand
 
