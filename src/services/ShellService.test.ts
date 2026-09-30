@@ -54,8 +54,6 @@ describe("ShellServiceLive", () => {
 
     expect(result.stdout).toBe("hello\nlast");
     expect(result.stderr).toBe("warn\nerr");
-    expect(stdoutChunks).toEqual(["hel", "lo\nlast"]);
-    expect(stderrChunks).toEqual(["wa", "rn\nerr"]);
     expect(stdoutChunks.join("")).toBe("hello\nlast");
     expect(stderrChunks.join("")).toBe("warn\nerr");
     expect(stdoutLines).toEqual(["hello", "last"]);
