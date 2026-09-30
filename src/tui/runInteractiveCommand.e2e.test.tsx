@@ -5,6 +5,7 @@ import type { CliOptions } from "../cli.js";
 import type { ExecutionResult } from "../engine/Executor.js";
 import type { SystemItem } from "../schema/config.js";
 import { maxRenderedLogLines } from "./logBuffer.js";
+import { formatExecutionResultLog } from "./model.js";
 import { InteractiveRigApp } from "./runInteractiveCommand.js";
 import type { ExecuteInteractiveRun } from "./runner.js";
 
@@ -179,6 +180,79 @@ test("InteractiveRigApp drives preview execution, renders item progress, and ins
         apply: false,
       },
     ]);
+  } finally {
+    act(() => {
+      setup.renderer.destroy();
+    });
+  }
+});
+
+test("InteractiveRigApp renders update completion and visible post-check failures", async () => {
+  const results: readonly ExecutionResult[] = [
+    result("current-tool", "update_completed", "installed"),
+    {
+      ...result("broken-tool", "failed", "error"),
+      error: "Verification failed for broken-tool: Post-operation check did not pass",
+    },
+    {
+      ...result("dependent-tool", "blocked", "blocked"),
+      error: "Blocked by unsuccessful dependency: broken-tool",
+    },
+  ];
+  const executeRun: ExecuteInteractiveRun = async (_request, emit) => {
+    for (const item of results) {
+      emit({
+        kind: item.action === "failed" ? "error" : "progress",
+        itemName: item.name,
+        message: formatExecutionResultLog(item),
+        resultAction: item.action,
+        resultStatus: item.status,
+        resultError: item.error,
+      });
+    }
+    return { results };
+  };
+  const setup = await testRender(
+    <InteractiveRigApp
+      options={{ ...baseOptions, update: true }}
+      configSource={{ _tag: "local", path: "./system-config.json" }}
+      items={[
+        makeItem("current-tool"),
+        makeItem("broken-tool"),
+        makeItem("dependent-tool", { dependsOn: ["broken-tool"] }),
+      ]}
+      executeRun={executeRun}
+      onExit={() => undefined}
+    />,
+    { width: 160, height: 46 },
+  );
+
+  try {
+    await settle();
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Choose tags"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Review selection"));
+    await pressAndSettle(() => setup.mockInput.pressKey("r"));
+
+    const frame = await setup.waitForFrame(
+      (candidate) =>
+        candidate.includes("current-tool  update completed") &&
+        candidate.includes("broken-tool  failed") &&
+        candidate.includes("dependent-tool  blocked"),
+    );
+
+    expect(frame).toContain("2 need inspection");
+    expect(frame).toContain("Verification failed for broken-tool");
+    expect(frame).not.toContain("current-tool  updated");
+
+    await pressAndSettle(() => setup.mockInput.pressArrow("down"));
+    await pressAndSettle(() => setup.mockInput.pressArrow("down"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    const logFrame = await setup.waitForFrame((candidate) =>
+      candidate.includes("logs / broken-tool"),
+    );
+    expect(logFrame).toContain("Post-operation check did not pass");
   } finally {
     act(() => {
       setup.renderer.destroy();

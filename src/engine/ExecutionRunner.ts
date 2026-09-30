@@ -11,6 +11,7 @@ import type {
   BrewError,
   FileSystemInstallError,
   GitError,
+  ItemVerificationError,
   ShellError,
 } from "../errors.js";
 import type { ExecutionResult, ExecutorOptions, ItemAction } from "./Executor.js";
@@ -28,7 +29,7 @@ const executeItem = (
   groupLocks: Ref.Ref<Map<string, Deferred.Deferred<void>>>,
 ): Effect.Effect<
   ExecutionResult,
-  ShellError | GitError | BrewError | BackupError | FileSystemInstallError,
+  ShellError | GitError | BrewError | BackupError | FileSystemInstallError | ItemVerificationError,
   ShellService | BackupService | GitService | BrewService | FileSystem.FileSystem
 > =>
   Effect.gen(function* () {

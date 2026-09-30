@@ -53,5 +53,7 @@ export const formatError = (error: ExecutionError): string => {
       return `Backup error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
     case "FileSystemInstallError":
       return `Filesystem item error for ${error.path}: ${formatReason(error.reason, "No reason provided")}`;
+    case "ItemVerificationError":
+      return `Verification failed for ${error.itemName}: ${error.reason}`;
   }
 };

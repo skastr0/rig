@@ -211,16 +211,19 @@ describe("Reporter", () => {
       );
     });
 
-    it("should print updated status", () => {
+    it("should report update completion without claiming a version change", () => {
       const reporter = createReporter({ noColor: true });
 
       reporter.printProgress({
         name: "test",
         status: "installed",
-        action: "updated",
+        action: "update_completed",
       });
 
-      expect(output.some((line) => line.includes("test") && line.includes("updated"))).toBe(true);
+      expect(
+        output.some((line) => line.includes("test") && line.includes("update completed")),
+      ).toBe(true);
+      expect(output.some((line) => line.includes("updated"))).toBe(false);
     });
 
     it("should print would update for dry run with update", () => {
@@ -340,18 +343,18 @@ describe("Reporter", () => {
       expect(output.some((line) => line.includes("2 files backed up"))).toBe(true);
     });
 
-    it("should show updated and would_update counts", () => {
+    it("should show completed and planned update counts", () => {
       const reporter = createReporter({ noColor: true });
 
       const results: ExecutionResult[] = [
-        { name: "a", status: "installed", action: "updated" },
+        { name: "a", status: "installed", action: "update_completed" },
         { name: "b", status: "installed", action: "would_update" },
-        { name: "c", status: "installed", action: "updated" },
+        { name: "c", status: "installed", action: "update_completed" },
       ];
 
       reporter.printSummary(results);
 
-      expect(output.some((line) => line.includes("2 updated"))).toBe(true);
+      expect(output.some((line) => line.includes("2 updates completed"))).toBe(true);
       expect(output.some((line) => line.includes("1 would be updated"))).toBe(true);
     });
 

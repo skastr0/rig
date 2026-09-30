@@ -12,6 +12,7 @@ import type { GitService } from "../services/GitService.js";
 import type { BufferedLineEvent } from "../services/LineBuffer.js";
 import type { ShellExecutionOptions, ShellResult, ShellService } from "../services/ShellService.js";
 import type { BrewError, FileSystemInstallError, GitError, ShellError } from "../errors.js";
+import { ItemVerificationError } from "../errors.js";
 import { expandPath } from "../utils.js";
 import type { ExecutorOptions, ItemCheckResult } from "./Executor.js";
 import { installInspection } from "./InstallInspection.js";
@@ -21,6 +22,7 @@ const {
   checkDirInstall,
   checkSkillsInstall,
   checkSymlinkInstall,
+  getCheckDescription,
   getExecutionDetail,
   getInstallPreview,
   getManagedUpdateDetail,
@@ -202,6 +204,32 @@ export const checkItem = (
   );
 };
 
+const verifyItem = (
+  item: SystemItem,
+  shell: ShellService,
+  options: ExecutorOptions | undefined,
+): Effect.Effect<
+  void,
+  ShellError | FileSystemInstallError | ItemVerificationError,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const check = getCheckDescription(item);
+    emitVerbose(options, `[${item.name}] verify: ${check}`);
+    const state = yield* checkItem(item, shell);
+    if (state.type !== "installed") {
+      return yield* Effect.fail(
+        new ItemVerificationError({
+          itemName: item.name,
+          reason:
+            state.type === "needs_update"
+              ? state.reason
+              : `Post-operation check did not pass: ${check}`,
+        }),
+      );
+    }
+  });
+
 const installDirItem = (
   install: DirInstall,
   fs: FileSystem.FileSystem,
@@ -331,6 +359,7 @@ export const itemExecutionOperations: ItemExecutionOperations = {
   getManagedUpdatePreviewSteps,
   getInstallPreview,
   getExecutionDetail,
+  verifyItem,
   updateItem,
   updateSymlinkItem,
   installItem,

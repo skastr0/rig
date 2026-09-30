@@ -81,7 +81,7 @@ const bumpRunningProgress = (item: TuiRunItemState, line: PendingLogLine): TuiRu
 const phaseForResult = (line: PendingLogLine): TuiRunItemPhase => {
   switch (line.resultAction) {
     case "installed":
-    case "updated":
+    case "update_completed":
     case "would_update":
       return "succeeded";
     case "skipped":
@@ -147,7 +147,7 @@ export const statusLabelForRunItem = (item: TuiRunItemState): string => {
     case "running":
       return "installing";
     case "succeeded":
-      return item.action ?? "done";
+      return item.action === "update_completed" ? "update completed" : (item.action ?? "done");
     case "skipped":
       return item.action ?? "skipped";
     case "failed":

@@ -969,6 +969,12 @@ rig --ci --profile macbook --tags editor --status
 Status mode still executes the configured check commands for selected items. Keep checks idempotent and free of setup work.
 For remote HTTPS or GitHub sources, add `--apply` before `--status`; Rig refuses remote status checks until you explicitly trust the config.
 
+After a real install or update, Rig reruns the item's check before reporting success. Managed directories, symlinks, and skills use their built-in checks. A failed post-check fails the item and blocks its dependents; independent items can still finish. Headless execution prints the complete summary and exits `1` if any item fails, times out, or is blocked.
+
+`update completed` means the updater succeeded and the post-check passed. It does not claim that a newer version was installed: an already-current updater can succeed without changing anything. Write checks that verify the intended executable, installation owner, or required version; `which` alone only proves a command exists.
+
+Use `&&` for chained shell setup or strict Bash scripts (`set -euo pipefail`) so nested command and pipeline failures reach Rig. Rig cannot detect an error that a recipe masks while its check still passes.
+
 ### Common Issues
 
 **"Command not found" after install**

@@ -44,6 +44,11 @@ export class FileSystemInstallError extends Data.TaggedError("FileSystemInstallE
   readonly reason: string;
 }> {}
 
+export class ItemVerificationError extends Data.TaggedError("ItemVerificationError")<{
+  readonly itemName: string;
+  readonly reason: string;
+}> {}
+
 export class ValidationError extends Data.TaggedError("ValidationError")<{
   readonly issues: readonly string[];
 }> {}

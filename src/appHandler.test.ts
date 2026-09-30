@@ -158,7 +158,7 @@ describe("app handler", () => {
     });
     const results: readonly ExecutionResult[] = [
       { name: "installed-tool", status: "installed", action: "installed" },
-      { name: "updated-tool", status: "installed", action: "updated" },
+      { name: "updated-tool", status: "installed", action: "update_completed" },
       { name: "existing-tool", status: "installed", action: "skipped" },
     ];
     const execute = vi.fn(() => Effect.succeed(results));
@@ -171,7 +171,7 @@ describe("app handler", () => {
     expect(exitSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(output.some((line) => line.includes("1 installed"))).toBe(true);
-    expect(output.some((line) => line.includes("1 updated"))).toBe(true);
+    expect(output.some((line) => line.includes("1 update completed"))).toBe(true);
     expect(output.some((line) => line.includes("1 already installed"))).toBe(true);
   });
 

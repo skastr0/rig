@@ -144,8 +144,9 @@ export const formatReasonBadge = (reason: SelectionReason | undefined): string =
 export const formatExecutionResultLog = (result: ExecutionResult): string => {
   const detail = result.detail ? ` (${result.detail})` : "";
   const error = result.error ? `: ${result.error.trim()}` : "";
+  const action = result.action === "update_completed" ? "update completed" : result.action;
 
-  return `${result.name}: ${result.action}${detail}${error}`;
+  return `${result.name}: ${action}${detail}${error}`;
 };
 
 export const formatExecutionPreviewLogs = (result: ExecutionResult): readonly string[] => {

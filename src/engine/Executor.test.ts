@@ -464,6 +464,140 @@ describe("Executor", () => {
     expect(installed.has("a")).toBe(true);
   });
 
+  it.each(["install", "update"] as const)(
+    "rejects exit-zero %s commands whose post-check fails and blocks only their dependents",
+    async (operation) => {
+      const installed = new Set(operation === "update" ? ["a"] : []);
+      const baseShell = mockShellService(installed);
+      const commands: string[] = [];
+      const mutation = operation === "update" ? "tool update" : "brew install a";
+      const shell: ShellService = {
+        ...baseShell,
+        run: (command, options) =>
+          Effect.gen(function* () {
+            commands.push(command);
+            if (command === mutation) {
+              installed.delete("a");
+              return { stdout: "Command completed", stderr: "", exitCode: 0 };
+            }
+            return yield* baseShell.run(command, options);
+          }),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([
+          makeItem("a", { update: "tool update" }),
+          makeItem("b"),
+          makeItem("c", { dependsOn: ["a"] }),
+          makeItem("d", { dependsOn: ["c"] }),
+          makeItem("e", { dependsOn: ["b"] }),
+        ]),
+      );
+      const progress: ExecutionResult[] = [];
+      const layer = Layer.mergeAll(createTestLayer(installed), Layer.succeed(ShellService, shell));
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, {
+            update: true,
+            onProgress: (result) => progress.push(result),
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results).toEqual([
+        {
+          name: "a",
+          action: "failed",
+          status: "error",
+          error: "Verification failed for a: Post-operation check did not pass: which a",
+        },
+        { name: "b", action: "installed", status: "installed" },
+        expect.objectContaining({ name: "c", action: "blocked", status: "blocked" }),
+        { name: "e", action: "installed", status: "installed" },
+        expect.objectContaining({ name: "d", action: "blocked", status: "blocked" }),
+      ]);
+      expect(progress.filter((result) => result.name === "a")).toEqual([results[0]]);
+      expect(commands.filter((command) => command.endsWith(" a") || command === mutation)).toEqual([
+        "which a",
+        mutation,
+        "which a",
+      ]);
+      expect(commands).not.toContain("which c");
+      expect(commands).not.toContain("which d");
+      expect(installed).toEqual(new Set(["b", "e"]));
+    },
+  );
+
+  it.each([
+    { exitCode: 127, timedOut: false, action: "failed", reason: "check executable disappeared" },
+    { exitCode: -1, timedOut: true, action: "timed_out", reason: "Timed out after 5000ms" },
+  ] as const)("preserves post-check $action failures", async (failure) => {
+    const installed = new Set<string>();
+    const baseShell = mockShellService(installed);
+    const shell: ShellService = {
+      ...baseShell,
+      run: (command, options) =>
+        command === "which a" && installed.has("a")
+          ? Effect.fail(
+              new ShellError({
+                command,
+                exitCode: failure.exitCode,
+                stderr: failure.reason,
+                timedOut: failure.timedOut,
+                timeoutMs: 5_000,
+              }),
+            )
+          : baseShell.run(command, options),
+    };
+    const plan = await Effect.runPromise(
+      topologicalSort([makeItem("a", { timeout: 5_000 }), makeItem("b", { dependsOn: ["a"] })]),
+    );
+    const layer = Layer.mergeAll(createTestLayer(installed), Layer.succeed(ShellService, shell));
+
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.execute(plan);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(results[0]).toMatchObject({ name: "a", status: "error", action: failure.action });
+    expect(results[0].error).toContain(failure.reason);
+    expect(results[1]).toMatchObject({ name: "b", status: "blocked", action: "blocked" });
+  });
+
+  it.each([false, true])(
+    "does not perform mutations or post-checks in dry run (installed=%s)",
+    async (isInstalled) => {
+      const installed = new Set(isInstalled ? ["a"] : []);
+      const baseShell = mockShellService(installed);
+      const commands: string[] = [];
+      const shell: ShellService = {
+        ...baseShell,
+        run: (command, options) => {
+          commands.push(command);
+          return baseShell.run(command, options);
+        },
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([makeItem("a", { update: "tool update" })]),
+      );
+      const layer = Layer.mergeAll(createTestLayer(installed), Layer.succeed(ShellService, shell));
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, { dryRun: true, update: true });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(commands).toEqual(["which a"]);
+      expect(results[0].action).toBe(isInstalled ? "would_update" : "skipped");
+      expect(installed).toEqual(new Set(isInstalled ? ["a"] : []));
+    },
+  );
+
   it("should respect dry run option", async () => {
     const installed = new Set<string>();
     const items = [makeItem("a")];
@@ -755,7 +889,7 @@ describe("Executor", () => {
     const installed = new Set<string>();
     const shell: ShellService = {
       run: (command) =>
-        command === "custom-missing-check"
+        command === "custom-missing-check" && !installed.has("a")
           ? Effect.fail(
               new ShellError({
                 command,
@@ -1056,24 +1190,15 @@ describe("Executor", () => {
     expect(results[0]?.error).toContain("Stderr: Error: network unavailable");
   });
 
-  it("passes configured timeout to shell checks and installs", async () => {
+  it("passes configured timeout to shell checks, installs, and verification", async () => {
     const observedTimeouts: Array<unknown> = [];
+    const installed = new Set<string>();
+    const baseShell = mockShellService(installed);
     const shell: ShellService = {
       run: (command, options) =>
         Effect.gen(function* () {
           observedTimeouts.push(options?.timeout);
-
-          if (command.startsWith("which ")) {
-            return yield* Effect.fail(
-              new ShellError({
-                command,
-                exitCode: 1,
-                stderr: "not installed",
-              }),
-            );
-          }
-
-          return { stdout: "", stderr: "", exitCode: 0 };
+          return yield* baseShell.run(command, options);
         }),
       exec: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
     };
@@ -1096,10 +1221,34 @@ describe("Executor", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(observedTimeouts).toEqual([5_000, 5_000]);
+    expect(observedTimeouts).toEqual([5_000, 5_000, 5_000]);
   });
 
   describe("dir install strategy", () => {
+    it("rejects successful directory creation that leaves the directory missing", async () => {
+      const fileSystem = {
+        ...createMockFileSystem(),
+        makeDirectory: () => Effect.void,
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([makeDirItem("projects-root", "~/Projects")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toMatchObject({
+        name: "projects-root",
+        action: "failed",
+        status: "error",
+      });
+      expect(results[0].error).toContain("Verification failed for projects-root");
+    });
+
     it("creates missing directories", async () => {
       const fileSystem = createMockFileSystem();
       const plan = await Effect.runPromise(
@@ -1368,7 +1517,7 @@ describe("Executor", () => {
       expect(results).toEqual([
         expect.objectContaining({
           name: "zshrc",
-          action: "updated",
+          action: "update_completed",
           status: "installed",
           backed_up: "/backup/~/.zshrc",
         }),
@@ -1378,9 +1527,74 @@ describe("Executor", () => {
         target: normalizeTestPath("~/.dotfiles/.zshrc"),
       });
     });
+
+    it("rejects a managed update that recreates the wrong symlink target", async () => {
+      const baseFileSystem = createMockFileSystem({
+        "~/.dotfiles/.zshrc": { type: "File" },
+        "~/.legacy/.zshrc": { type: "File" },
+        "~/.zshrc": { type: "SymbolicLink", target: normalizeTestPath("~/.legacy/.zshrc") },
+      });
+      const fileSystem = {
+        ...baseFileSystem,
+        symlink: (_target: string, path: string) =>
+          baseFileSystem.symlink(normalizeTestPath("~/.legacy/.zshrc"), path),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSymlinkItem("zshrc", "~/.zshrc", "~/.dotfiles/.zshrc")]),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan, { update: true });
+        }).pipe(Effect.provide(createTestLayer(new Set<string>(), fileSystem))),
+      );
+
+      expect(results[0]).toMatchObject({ name: "zshrc", action: "failed", status: "error" });
+      expect(results[0].error).toContain("Verification failed for zshrc");
+      expect(results[0].error).toContain(normalizeTestPath("~/.legacy/.zshrc"));
+      expect(results[0].error).toContain(normalizeTestPath("~/.dotfiles/.zshrc"));
+    });
   });
 
   describe("skills install strategy", () => {
+    it("rejects a skills installer that omits one of the requested agents", async () => {
+      const fileSystem = createMockFileSystem();
+      const installed = new Set<string>();
+      const shell: ShellService = {
+        ...mockShellService(installed),
+        exec: () =>
+          fileSystem
+            .writeFileString("~/.codex/skills/frontend-design/SKILL.md", "skill")
+            .pipe(Effect.as({ stdout: "installed for codex", stderr: "", exitCode: 0 })),
+      };
+      const plan = await Effect.runPromise(
+        topologicalSort([makeSkillsItem("agent-skills", { agents: ["codex", "opencode"] })]),
+      );
+      const layer = Layer.mergeAll(
+        createTestLayer(installed, fileSystem),
+        Layer.succeed(ShellService, shell),
+      );
+
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.execute(plan);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(results[0]).toMatchObject({ name: "agent-skills", action: "failed", status: "error" });
+      expect(results[0].error).toContain("Verification failed for agent-skills");
+      expect(
+        fileSystem.entries.has(normalizeTestPath("~/.codex/skills/frontend-design/SKILL.md")),
+      ).toBe(true);
+      expect(
+        fileSystem.entries.has(
+          normalizeTestPath("~/.config/opencode/skills/frontend-design/SKILL.md"),
+        ),
+      ).toBe(false);
+    });
+
     it("skips when all requested skills exist for all requested agents", async () => {
       const fileSystem = createMockFileSystem({
         "~/.codex/skills/frontend-design/SKILL.md": { type: "File" },
@@ -1423,8 +1637,16 @@ describe("Executor", () => {
       const shell: ShellService = {
         run: () => Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
         exec: (command, args, options) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             execCalls.push({ command, args, timeout: options?.timeout });
+            for (const path of [
+              "~/.codex/skills/frontend-design/SKILL.md",
+              "~/.codex/skills/skill-creator/SKILL.md",
+              "~/.config/opencode/skills/frontend-design/SKILL.md",
+              "~/.config/opencode/skills/skill-creator/SKILL.md",
+            ]) {
+              yield* fileSystem.writeFileString(path, "skill");
+            }
             return { stdout: "installed", stderr: "", exitCode: 0 };
           }),
       };
@@ -1603,9 +1825,10 @@ describe("Executor", () => {
         cwd?: string;
       }> = [];
       const fileSystem = createMockFileSystem();
+      let installed = false;
       const shell: ShellService = {
         run: (command) =>
-          command.startsWith("which ")
+          command.startsWith("which ") && !installed
             ? Effect.fail(new ShellError({ command, exitCode: 1, stderr: "not found" }))
             : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
         exec: (command, args, options) =>
@@ -1616,6 +1839,7 @@ describe("Executor", () => {
               timeout: options?.timeout,
               cwd: options?.cwd,
             });
+            installed = true;
             return { stdout: "script ok", stderr: "", exitCode: 0 };
           }),
       };
@@ -1709,21 +1933,35 @@ describe("Executor", () => {
 
   // Update mode tests
   describe("update mode", () => {
-    it("should run update command when --update flag is set and item has update field", async () => {
+    it("reports a successful no-op updater only after its post-check passes", async () => {
       const installed = new Set(["a"]);
+      const baseShell = mockShellService(installed);
+      const commands: string[] = [];
+      const shell: ShellService = {
+        ...baseShell,
+        run: (command, options) => {
+          commands.push(command);
+          return baseShell.run(command, options);
+        },
+      };
       const items = [makeItem("a", { update: "brew upgrade a" })];
       const plan = await Effect.runPromise(topologicalSort(items));
+      const layer = Layer.mergeAll(createTestLayer(installed), Layer.succeed(ShellService, shell));
 
       const results = await Effect.runPromise(
         Effect.gen(function* () {
           const executor = yield* Executor;
-          return yield* executor.execute(plan, { update: true });
-        }).pipe(Effect.provide(createTestLayer(installed))),
+          return yield* executor.execute(plan, {
+            update: true,
+            onProgress: () => expect(commands).toEqual(["which a", "brew upgrade a", "which a"]),
+          });
+        }).pipe(Effect.provide(layer)),
       );
 
       expect(results).toHaveLength(1);
-      expect(results[0].action).toBe("updated");
+      expect(results[0].action).toBe("update_completed");
       expect(results[0].name).toBe("a");
+      expect(installed).toEqual(new Set(["a"]));
     });
 
     it("should run script update commands through interpreter files", async () => {
@@ -1774,7 +2012,7 @@ describe("Executor", () => {
       expect(results[0]).toEqual(
         expect.objectContaining({
           name: "service",
-          action: "updated",
+          action: "update_completed",
           status: "installed",
         }),
       );
@@ -2011,7 +2249,7 @@ describe("Executor", () => {
       );
 
       expect(results).toHaveLength(1);
-      expect(results[0].action).toBe("updated");
+      expect(results[0].action).toBe("update_completed");
       expect(results[0].backed_up).toBe("/backup/~/.config/a");
     });
 

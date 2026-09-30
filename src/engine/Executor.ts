@@ -13,7 +13,7 @@ export type ItemStatus = "installed" | "missing" | "error" | "blocked";
 export type ItemAction =
   | "skipped"
   | "installed"
-  | "updated"
+  | "update_completed"
   | "would_update"
   | "failed"
   | "timed_out"

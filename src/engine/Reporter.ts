@@ -59,8 +59,8 @@ const progressDisplayFor = (
   switch (result.action) {
     case "installed":
       return { icon: symbols.check, color: c.green, actionText: "installed" };
-    case "updated":
-      return { icon: symbols.check, color: c.green, actionText: "updated" };
+    case "update_completed":
+      return { icon: symbols.check, color: c.green, actionText: "update completed" };
     case "would_update":
       return { icon: symbols.dot, color: c.yellow, actionText: "would update" };
     case "skipped":
@@ -338,7 +338,7 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     const timedOutResults = results.filter((r) => r.action === "timed_out");
     const blockedResults = results.filter((r) => r.action === "blocked");
     const installed = results.filter((r) => r.action === "installed").length;
-    const updated = results.filter((r) => r.action === "updated").length;
+    const completedUpdates = results.filter((r) => r.action === "update_completed").length;
     const wouldUpdate = results.filter((r) => r.action === "would_update").length;
     const skipped = results.filter(
       (r) => r.action === "skipped" && r.status === "installed",
@@ -356,8 +356,10 @@ export const createReporter = (options?: { noColor?: boolean; verbose?: boolean 
     if (installed > 0) {
       console.log(`  ${c.green}${symbols.check}${c.reset} ${installed} installed`);
     }
-    if (updated > 0) {
-      console.log(`  ${c.green}${symbols.check}${c.reset} ${updated} updated`);
+    if (completedUpdates > 0) {
+      console.log(
+        `  ${c.green}${symbols.check}${c.reset} ${completedUpdates} update${completedUpdates === 1 ? "" : "s"} completed`,
+      );
     }
     if (wouldUpdate > 0) {
       console.log(`  ${c.yellow}${symbols.dot}${c.reset} ${wouldUpdate} would be updated`);

@@ -11,6 +11,7 @@ import type {
   BrewError,
   BackupError,
   FileSystemInstallError,
+  ItemVerificationError,
 } from "../errors.js";
 import type {
   ExecutionPreview,
@@ -26,7 +27,8 @@ export type ExecuteItemError =
   | GitError
   | BrewError
   | BackupError
-  | FileSystemInstallError;
+  | FileSystemInstallError
+  | ItemVerificationError;
 
 export interface ItemExecutionServices {
   readonly shell: ShellService;
@@ -47,6 +49,15 @@ export interface ItemExecutionOperations {
   readonly getManagedUpdatePreviewSteps: (install: SymlinkInstall) => readonly string[];
   readonly getInstallPreview: (install: SystemItem["install"]) => ExecutionPreview;
   readonly getExecutionDetail: (install: SystemItem["install"]) => string | undefined;
+  readonly verifyItem: (
+    item: SystemItem,
+    shell: ShellService,
+    options: ExecutorOptions | undefined,
+  ) => Effect.Effect<
+    void,
+    ShellError | FileSystemInstallError | ItemVerificationError,
+    FileSystem.FileSystem
+  >;
   readonly updateItem: (
     item: SystemItem,
     shell: ShellService,
@@ -136,7 +147,7 @@ const executeInstalledItem = (
   options: ExecutorOptions | undefined,
 ): Effect.Effect<
   ExecutionResult,
-  ShellError | BackupError | FileSystemInstallError,
+  ShellError | BackupError | FileSystemInstallError | ItemVerificationError,
   FileSystem.FileSystem
 > => {
   const update = item.update;
@@ -162,9 +173,10 @@ const executeInstalledItem = (
       `[${item.name}] update: ${operations.getUpdatePreview(update).steps.join(" && ")}`,
     );
     yield* operations.updateItem(item, services.shell, services.fs, options);
+    yield* operations.verifyItem(item, services.shell, options);
 
     return reportExecutionResult(
-      makeExecutionResult(item, "installed", "updated", backedUpDetail(backedUp)),
+      makeExecutionResult(item, "installed", "update_completed", backedUpDetail(backedUp)),
       options,
     );
   });
@@ -176,7 +188,11 @@ const executeManagedUpdateItem = (
   services: ItemExecutionServices,
   operations: ItemExecutionOperations,
   options: ExecutorOptions | undefined,
-): Effect.Effect<ExecutionResult, BackupError | FileSystemInstallError, FileSystem.FileSystem> => {
+): Effect.Effect<
+  ExecutionResult,
+  ShellError | BackupError | FileSystemInstallError | ItemVerificationError,
+  FileSystem.FileSystem
+> => {
   if (!operations.isSymlinkInstall(item.install)) {
     return Effect.fail(
       operations.toFileSystemInstallError(
@@ -217,9 +233,10 @@ const executeManagedUpdateItem = (
       options,
     );
     yield* operations.updateSymlinkItem(install, services.fs);
+    yield* operations.verifyItem(item, services.shell, options);
 
     return reportExecutionResult(
-      makeExecutionResult(item, "installed", "updated", backedUpDetail(backedUp)),
+      makeExecutionResult(item, "installed", "update_completed", backedUpDetail(backedUp)),
       options,
     );
   });
@@ -267,6 +284,7 @@ const installMissingItem = (
       services.fs,
       options,
     );
+    yield* operations.verifyItem(item, services.shell, options);
 
     return reportExecutionResult(
       makeExecutionResult(item, "installed", "installed", backedUpDetail(backedUp)),

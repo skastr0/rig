@@ -5,6 +5,7 @@ import {
   CycleError,
   FileSystemInstallError,
   GitError,
+  ItemVerificationError,
   ShellError,
   ValidationError,
 } from "./errors.js";
@@ -63,6 +64,10 @@ const errorFormatters = [
   errorFormatter(
     (error): error is FileSystemInstallError => error instanceof FileSystemInstallError,
     (error) => `Filesystem item error for ${error.path}: ${error.reason}`,
+  ),
+  errorFormatter(
+    (error): error is ItemVerificationError => error instanceof ItemVerificationError,
+    (error) => `Verification failed for ${error.itemName}: ${error.reason}`,
   ),
 ] as const;
 
