@@ -9,7 +9,7 @@ const formatReason = (reason: string, fallback: string): string => {
 };
 
 const formatStructuredCommandDetail = (
-  error: Pick<GitError | BrewError, "command" | "exitCode" | "stderr">,
+  error: Pick<GitError | BrewError, "command" | "exitCode" | "stdout" | "stderr">,
 ): string => {
   const details: string[] = [];
 
@@ -19,6 +19,11 @@ const formatStructuredCommandDetail = (
 
   if (error.exitCode !== undefined && error.exitCode >= 0) {
     details.push(`Exit code: ${error.exitCode}`);
+  }
+
+  const stdout = error.stdout?.trim();
+  if (stdout && stdout.length > 0) {
+    details.push(`Stdout: ${stdout}`);
   }
 
   const stderr = error.stderr?.trim();
@@ -37,10 +42,13 @@ const formatTimeoutSuffix = (timeoutMs: number | undefined): string =>
 
 export const formatError = (error: ExecutionError): string => {
   switch (error._tag) {
-    case "ShellError":
+    case "ShellError": {
+      const stdoutDetail =
+        error.stdout === undefined ? "" : formatStructuredCommandDetail({ stdout: error.stdout });
       return error.timedOut
-        ? `Command "${error.command}" timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.stderr, "No stderr output")}`
-        : `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}`;
+        ? `Command "${error.command}" timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.stderr, "No stderr output")}${stdoutDetail}`
+        : `Command "${error.command}" failed with exit code ${error.exitCode}: ${formatReason(error.stderr, "No stderr output")}${stdoutDetail}`;
+    }
     case "GitError":
       return error.timedOut
         ? `Git operation for ${error.repo} timed out${formatTimeoutSuffix(error.timeoutMs)}: ${formatReason(error.reason, "No reason provided")}${formatStructuredCommandDetail(error)}`

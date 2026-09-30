@@ -729,6 +729,7 @@ describe("Executor", () => {
               new ShellError({
                 command,
                 exitCode: 1,
+                stdout: "  Could not fetch the release archive\n",
                 stderr: "network unavailable",
               }),
             );
@@ -775,6 +776,8 @@ describe("Executor", () => {
       expect.objectContaining({ name: "c", action: "blocked", status: "blocked" }),
       expect.objectContaining({ name: "d", action: "installed", status: "installed" }),
     ]);
+    expect(results[0].error).toContain("Stdout: Could not fetch the release archive");
+    expect(results[0].error).toContain("network unavailable");
     expect(installed.has("b")).toBe(true);
     expect(installed.has("d")).toBe(true);
   });
@@ -795,7 +798,8 @@ describe("Executor", () => {
                 new ShellError({
                   command,
                   exitCode: 1,
-                  stderr: "boom",
+                  stdout: "Required runtime dependency could not be loaded",
+                  stderr: "",
                 }),
               )
             : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
@@ -827,6 +831,7 @@ describe("Executor", () => {
     );
 
     expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "failed" }));
+    expect(results[0].error).toContain("Stdout: Required runtime dependency could not be loaded");
     expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
     expect(results[1].error).toContain("a");
     expect(results[2]).toEqual(expect.objectContaining({ name: "c", action: "blocked" }));
@@ -994,6 +999,7 @@ describe("Executor", () => {
                 new ShellError({
                   command,
                   exitCode: -1,
+                  stdout: "Waiting for the download server",
                   stderr: "Timed out after 5ms",
                   timedOut: true,
                   timeoutMs: 5,
@@ -1025,6 +1031,8 @@ describe("Executor", () => {
 
     expect(results[0]).toEqual(expect.objectContaining({ name: "a", action: "timed_out" }));
     expect(results[0].error).toContain("timed out");
+    expect(results[0].error).toContain("Stdout: Waiting for the download server");
+    expect(results[0].error).toContain("Timed out after 5ms");
     expect(results[1]).toEqual(expect.objectContaining({ name: "b", action: "blocked" }));
   });
 
@@ -1103,6 +1111,7 @@ describe("Executor", () => {
             reason: "Failed to clone to /Users/test/dotfiles",
             command: "git clone https://github.com/example/dotfiles.git /Users/test/dotfiles",
             exitCode: 128,
+            stdout: "Authentication helper rejected the request",
             stderr: "fatal: repository not found",
           }),
         ),
@@ -1132,6 +1141,7 @@ describe("Executor", () => {
       "Command: git clone https://github.com/example/dotfiles.git /Users/test/dotfiles",
     );
     expect(results[0]?.error).toContain("Exit code: 128");
+    expect(results[0]?.error).toContain("Stdout: Authentication helper rejected the request");
     expect(results[0]?.error).toContain("Stderr: fatal: repository not found");
   });
 
@@ -1158,6 +1168,7 @@ describe("Executor", () => {
             reason: "Failed to install formula ripgrep",
             command: "brew install ripgrep",
             exitCode: 1,
+            stdout: "Could not fetch the formula bottle",
             stderr: "Error: network unavailable",
           }),
         ),
@@ -1187,6 +1198,7 @@ describe("Executor", () => {
     expect(results[0]?.error).toContain("Brew error for ripgrep");
     expect(results[0]?.error).toContain("Command: brew install ripgrep");
     expect(results[0]?.error).toContain("Exit code: 1");
+    expect(results[0]?.error).toContain("Stdout: Could not fetch the formula bottle");
     expect(results[0]?.error).toContain("Stderr: Error: network unavailable");
   });
 
