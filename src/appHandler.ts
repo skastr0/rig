@@ -304,6 +304,19 @@ const runExecutionCommand = (
     const results = yield* executor.execute(plan, executeOptions);
 
     reporter.printSummary(results);
+
+    if (
+      results.some(
+        (result) =>
+          result.action === "failed" ||
+          result.action === "timed_out" ||
+          result.action === "blocked",
+      )
+    ) {
+      return yield* exitWithMessage(
+        "Execution failed: one or more items failed, timed out, or were blocked.",
+      );
+    }
   });
 
 const runConfiguredCommand = (

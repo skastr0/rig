@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { Effect, Layer } from "effect";
 import type { CliOptions } from "./cli.js";
-import { Executor, type ExecutorOptions } from "./engine/Executor.js";
+import { Executor, type ExecutionResult, type ExecutorOptions } from "./engine/Executor.js";
 import type { PlanResult } from "./engine/Planner.js";
 import type { ConfigService } from "./services/ConfigService.js";
 import { ConfigService as ConfigServiceTag } from "./services/ConfigService.js";
@@ -70,11 +70,15 @@ describe("app handler", () => {
     const execute = vi.fn((_plan: PlanResult, _options?: ExecutorOptions) => Effect.succeed([]));
     const inspect = vi.fn(() => Effect.succeed([]));
     const executor = Executor.of({ execute, inspect });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("Unexpected process exit");
+    });
 
     await runHandler(baseOptions, executor);
 
     expect(execute).not.toHaveBeenCalled();
     expect(inspect).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
     expect(output.some((line) => line.includes("Remote Static Preview"))).toBe(true);
     expect(output.some((line) => line.includes("check command not executed"))).toBe(true);
     expect(output.some((line) => line.includes("echo should-not-run"))).toBe(true);
@@ -96,6 +100,79 @@ describe("app handler", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(inspect).not.toHaveBeenCalled();
     expect(output.some((line) => line.includes("echo update-preview-only"))).toBe(true);
+  });
+
+  it.each([
+    { action: "failed", status: "error", summary: "1 failed" },
+    { action: "timed_out", status: "error", summary: "1 timed out" },
+    { action: "blocked", status: "blocked", summary: "1 blocked by dependencies" },
+  ] satisfies ReadonlyArray<{
+    action: ExecutionResult["action"];
+    status: ExecutionResult["status"];
+    summary: string;
+  }>)("exits nonzero after the complete summary for $action results", async (failure) => {
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      expect(output.some((line) => line.includes("Summary:"))).toBe(true);
+      expect(output.some((line) => line.includes("1 installed"))).toBe(true);
+      expect(output.some((line) => line.includes(failure.summary))).toBe(true);
+      expect(output.some((line) => line.includes("independent-tool"))).toBe(true);
+      throw new Error("Simulated process exit");
+    });
+    const results: readonly ExecutionResult[] = [
+      { name: "remote-tool", status: failure.status, action: failure.action, error: "failed" },
+      { name: "independent-tool", status: "installed", action: "installed" },
+    ];
+    const execute = vi.fn((_plan: PlanResult, options?: ExecutorOptions) =>
+      Effect.sync(() => {
+        results.forEach((result) => options?.onProgress?.(result));
+        return results;
+      }),
+    );
+    const inspect = vi.fn(() => Effect.succeed([]));
+
+    await expect(
+      runHandler({ ...baseOptions, apply: true }, Executor.of({ execute, inspect })),
+    ).rejects.toThrow("Simulated process exit");
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(inspect).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "\nExecution failed: one or more items failed, timed out, or were blocked.\n",
+    );
+  });
+
+  it("keeps all-success execution successful", async () => {
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("Unexpected process exit");
+    });
+    const results: readonly ExecutionResult[] = [
+      { name: "installed-tool", status: "installed", action: "installed" },
+      { name: "updated-tool", status: "installed", action: "updated" },
+      { name: "existing-tool", status: "installed", action: "skipped" },
+    ];
+    const execute = vi.fn(() => Effect.succeed(results));
+    const inspect = vi.fn(() => Effect.succeed([]));
+
+    await runHandler({ ...baseOptions, apply: true }, Executor.of({ execute, inspect }));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(inspect).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(output.some((line) => line.includes("1 installed"))).toBe(true);
+    expect(output.some((line) => line.includes("1 updated"))).toBe(true);
+    expect(output.some((line) => line.includes("1 already installed"))).toBe(true);
   });
 
   it("requires --apply before remote status can execute checks", async () => {
