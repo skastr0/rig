@@ -9,7 +9,7 @@ import {
 import { resolveExecutionMode, type ExecutionMode } from "./executionMode.js";
 import { ConfigService } from "./services/ConfigService.js";
 import { topologicalSort, type PlanResult } from "./engine/Planner.js";
-import { Executor } from "./engine/Executor.js";
+import { Executor, hasExecutionFailures } from "./engine/Executor.js";
 import { createReporter, type Reporter, type WhyReport } from "./engine/Reporter.js";
 import {
   analyzeSelection,
@@ -276,6 +276,12 @@ const runStatusCommand = (
     });
 
     reporter.printStatus(statusResults);
+
+    if (statusResults.some((result) => result.status === "error")) {
+      return yield* exitWithMessage(
+        "Inspection failed: one or more item checks could not be completed.",
+      );
+    }
   });
 
 const runExecutionCommand = (
@@ -305,14 +311,7 @@ const runExecutionCommand = (
 
     reporter.printSummary(results);
 
-    if (
-      results.some(
-        (result) =>
-          result.action === "failed" ||
-          result.action === "timed_out" ||
-          result.action === "blocked",
-      )
-    ) {
+    if (hasExecutionFailures(results)) {
       return yield* exitWithMessage(
         "Execution failed: one or more items failed, timed out, or were blocked.",
       );
@@ -381,15 +380,23 @@ const runInteractiveCommandIfRequested = (options: CliOptions, configService: Co
       () => import("./tui/runInteractiveCommand.js"),
     );
 
-    yield* runInteractiveCommand({ options, configSource, items: config.items });
+    const exitCode = yield* runInteractiveCommand({ options, configSource, items: config.items });
+    if (exitCode !== 0) {
+      yield* exitWithMessage(
+        exitCode === 130
+          ? "Execution cancelled."
+          : "Execution failed: one or more interactive runs were unsuccessful.",
+        exitCode,
+      );
+    }
 
     return true;
   });
 
-const exitWithMessage = (message: string) =>
+const exitWithMessage = (message: string, exitCode = 1) =>
   Effect.sync(() => {
     console.error(`\n${message}\n`);
-    process.exit(1);
+    process.exit(exitCode);
   });
 
 const createHandlerEffect = (options: CliOptions) =>

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { Effect, Layer } from "effect";
 import type { CliOptions } from "./cli.js";
-import { Executor, type ExecutionResult, type ExecutorOptions } from "./engine/Executor.js";
+import {
+  Executor,
+  type ExecutionResult,
+  type ExecutorOptions,
+  type InspectionResult,
+} from "./engine/Executor.js";
 import type { PlanResult } from "./engine/Planner.js";
 import type { ConfigService } from "./services/ConfigService.js";
 import { ConfigService as ConfigServiceTag } from "./services/ConfigService.js";
@@ -173,6 +178,71 @@ describe("app handler", () => {
     expect(output.some((line) => line.includes("1 installed"))).toBe(true);
     expect(output.some((line) => line.includes("1 update completed"))).toBe(true);
     expect(output.some((line) => line.includes("1 already installed"))).toBe(true);
+  });
+
+  it("exits nonzero after the full status summary when an item check errors", async () => {
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      expect(output.some((line) => line.includes("Status Summary:"))).toBe(true);
+      expect(output.some((line) => line.includes("1 installed"))).toBe(true);
+      expect(output.some((line) => line.includes("1 error"))).toBe(true);
+      expect(output.some((line) => line.includes("1 blocked"))).toBe(true);
+      expect(output.some((line) => line.includes("check command exited 127"))).toBe(true);
+      throw new Error("Simulated process exit");
+    });
+    const results: readonly InspectionResult[] = [
+      { name: "remote-tool", status: "error", reason: "check command exited 127" },
+      { name: "dependent-tool", status: "blocked", reason: "remote-tool is not ready" },
+      { name: "independent-tool", status: "installed" },
+    ];
+    const execute = vi.fn(() => Effect.succeed([]));
+    const inspect = vi.fn(() => Effect.succeed(results));
+
+    await expect(
+      runHandler({ ...baseOptions, status: true, apply: true }, Executor.of({ execute, inspect })),
+    ).rejects.toThrow("Simulated process exit");
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "\nInspection failed: one or more item checks could not be completed.\n",
+    );
+  });
+
+  it("keeps missing status results informational when checks complete normally", async () => {
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("Unexpected process exit");
+    });
+    const results: readonly InspectionResult[] = [
+      { name: "remote-tool", status: "missing" },
+      { name: "dependent-tool", status: "blocked", reason: "remote-tool is missing" },
+      { name: "current-tool", status: "updateable" },
+    ];
+    const execute = vi.fn(() => Effect.succeed([]));
+    const inspect = vi.fn(() => Effect.succeed(results));
+
+    await runHandler(
+      { ...baseOptions, status: true, apply: true },
+      Executor.of({ execute, inspect }),
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(output.some((line) => line.includes("1 missing"))).toBe(true);
+    expect(output.some((line) => line.includes("1 blocked"))).toBe(true);
+    expect(output.some((line) => line.includes("1 updateable"))).toBe(true);
   });
 
   it("requires --apply before remote status can execute checks", async () => {

@@ -2,6 +2,7 @@ import { createCliRenderer, type SelectOption } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { Effect } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { hasExecutionFailures } from "../engine/Executor.js";
 import { formatError } from "../errorFormatting.js";
 import { ConfigError } from "../errors.js";
 import { AppRuntime } from "../runtime.js";
@@ -32,12 +33,14 @@ import {
 import { getRunDisabledReason } from "./safety.js";
 import { useRigKeyboard } from "./useRigKeyboard.js";
 
+type InteractiveExitCode = 0 | 1 | 130;
+
 export interface InteractiveRigAppProps {
   readonly options: InteractiveCommandInput["options"];
   readonly configSource: InteractiveCommandInput["configSource"];
   readonly items: readonly SystemItem[];
   readonly executeRun: ExecuteInteractiveRun;
-  readonly onExit: () => void;
+  readonly onExit: (exitCode: InteractiveExitCode) => void;
 }
 
 const formatTagName = (name: string, selected: boolean): string =>
@@ -89,12 +92,14 @@ export function InteractiveRigApp({
   const [verbose, setVerbose] = useState(options.verbose);
   const [update, setUpdate] = useState(options.update);
   const [running, setRunning] = useState(false);
+  const [runExitCode, setRunExitCode] = useState<InteractiveExitCode>(0);
   const [logs, setLogs] = useState<readonly TuiLogLine[]>([]);
   const [runItems, setRunItems] = useState<readonly TuiRunItemState[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   const [filterActive, setFilterActive] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const runningRef = useRef(false);
+  const sessionExitCodeRef = useRef<InteractiveExitCode>(0);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const pendingLogsRef = useRef<PendingLogLine[]>([]);
   const logFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -265,7 +270,7 @@ export function InteractiveRigApp({
   }, [logsOpen, running, selectedProfileIndex, stage]);
 
   const advance = useCallback(() => {
-    if ((stage === "running" || stage === "done") && selectedItemName !== undefined) {
+    if (stage === "running" || stage === "done") {
       setLogsOpen(true);
       return;
     }
@@ -293,7 +298,7 @@ export function InteractiveRigApp({
       setSelectedIndex(0);
       return;
     }
-  }, [profileRows, running, selectedItemName, selectedOption?.value, stage]);
+  }, [profileRows, running, selectedOption?.value, stage]);
 
   const toggleTag = useCallback(() => {
     if (running || stage !== "tags") {
@@ -315,6 +320,13 @@ export function InteractiveRigApp({
       return next;
     });
   }, [running, selectedOption?.value, stage]);
+
+  const recordRunExitCode = useCallback((exitCode: InteractiveExitCode) => {
+    if (exitCode === 1 || sessionExitCodeRef.current === 0) {
+      sessionExitCodeRef.current = exitCode;
+    }
+    setRunExitCode(exitCode);
+  }, []);
 
   const finishRun = useCallback(() => {
     flushPendingLogs();
@@ -340,8 +352,15 @@ export function InteractiveRigApp({
           appendLog,
           signal,
         );
-        appendLog({ kind: "system", message: formatPlanLine(summary.results) });
+        const exitCode = hasExecutionFailures(summary.results) ? 1 : signal.aborted ? 130 : 0;
+        recordRunExitCode(exitCode);
+        appendLog({
+          kind: exitCode === 1 ? "error" : "system",
+          message: exitCode === 130 ? "Run cancelled" : formatPlanLine(summary.results),
+        });
       } catch (error: unknown) {
+        recordRunExitCode(signal.aborted ? 130 : 1);
+        setLogsOpen(true);
         appendLog({
           kind: signal.aborted ? "system" : "error",
           message: signal.aborted ? "Run cancelled" : formatError(error),
@@ -356,6 +375,7 @@ export function InteractiveRigApp({
       finishRun,
       options.apply,
       options.only,
+      recordRunExitCode,
       selectedProfile,
       selectedTagNames,
       update,
@@ -387,6 +407,7 @@ export function InteractiveRigApp({
       );
       setStage("running");
       setSelectedIndex(0);
+      setRunExitCode(0);
       runningRef.current = true;
       setRunning(true);
 
@@ -395,6 +416,8 @@ export function InteractiveRigApp({
 
       const runPromise = runSelection(dryRun, controller.signal);
       runPromise.catch((error: unknown) => {
+        recordRunExitCode(1);
+        setLogsOpen(true);
         appendLog({ kind: "error", message: formatError(error) });
         finishRun();
       });
@@ -404,6 +427,7 @@ export function InteractiveRigApp({
       canRun,
       clearScheduledLogFlush,
       finishRun,
+      recordRunExitCode,
       runDisabledReason,
       runSelection,
       executionSummary.analysis.reasons,
@@ -425,7 +449,7 @@ export function InteractiveRigApp({
   useRigKeyboard(
     { running, stage, filterActive, filterQuery, logsOpen },
     {
-      exit: onExit,
+      exit: () => onExit(sessionExitCodeRef.current),
       cancel: cancelRun,
       back: goBack,
       toggleTag,
@@ -453,7 +477,15 @@ export function InteractiveRigApp({
           ? "Review selection"
           : stage === "running"
             ? "Running"
-            : "Run complete";
+            : runExitCode === 1
+              ? "Run failed"
+              : runExitCode === 130
+                ? "Run cancelled"
+                : sessionExitCodeRef.current === 1
+                  ? "Session failed"
+                  : sessionExitCodeRef.current === 130
+                    ? "Cancelled"
+                    : "Run complete";
 
   return (
     <box
@@ -476,6 +508,13 @@ export function InteractiveRigApp({
               : filterActive
                 ? `${stageTitle} / filter`
                 : stageTitle
+          }
+          borderColor={
+            sessionExitCodeRef.current === 1
+              ? palette.crimson
+              : sessionExitCodeRef.current === 130
+                ? palette.amber
+                : palette.border
           }
           options={selectOptions}
           selectedIndex={selectedIndex}
@@ -523,7 +562,7 @@ export function InteractiveRigApp({
 
 export const runInteractiveCommand = (
   input: InteractiveCommandInput,
-): Effect.Effect<void, ConfigError> =>
+): Effect.Effect<InteractiveExitCode, ConfigError> =>
   Effect.tryPromise({
     try: async () => {
       const renderer = await createCliRenderer({
@@ -533,12 +572,12 @@ export const runInteractiveCommand = (
       });
       const root = createRoot(renderer);
 
-      await new Promise<void>((resolve) => {
-        const close = () => {
+      return await new Promise<InteractiveExitCode>((resolve) => {
+        const close = (exitCode: InteractiveExitCode) => {
           root.unmount();
           renderer.stop();
           renderer.destroy();
-          resolve();
+          resolve(exitCode);
         };
 
         root.render(

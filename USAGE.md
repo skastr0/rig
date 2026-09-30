@@ -968,8 +968,11 @@ rig --ci --profile macbook --tags editor --status
 
 Status mode still executes the configured check commands for selected items. Keep checks idempotent and free of setup work.
 For remote HTTPS or GitHub sources, add `--apply` before `--status`; Rig refuses remote status checks until you explicitly trust the config.
+Status inspection prints the full summary and exits `1` if a check cannot be completed, such as a timeout or missing check executable. Normal missing or updateable items remain informational.
 
 After a real install or update, Rig reruns the item's check before reporting success. Managed directories, symlinks, and skills use their built-in checks. A failed post-check fails the item and blocks its dependents; independent items can still finish. Headless execution prints the complete summary and exits `1` if any item fails, times out, or is blocked.
+
+Interactive sessions also exit `1` if any run fails, times out, is blocked, or crashes. Cancellation exits `130` unless an earlier failure requires `1`. Later successful runs or previews do not erase earlier unsuccessful outcomes; the completion heading retains the session's failed or cancelled status. Press enter on "All selected items" to inspect run-level errors and combined item logs.
 
 `update completed` means the updater succeeded and the post-check passed. It does not claim that a newer version was installed: an already-current updater can succeed without changing anything. Write checks that verify the intended executable, installation owner, or required version; `which` alone only proves a command exists.
 

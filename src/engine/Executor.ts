@@ -34,6 +34,12 @@ export interface ExecutionResult {
   readonly error?: string;
 }
 
+export const hasExecutionFailures = (results: readonly ExecutionResult[]): boolean =>
+  results.some(
+    (result) =>
+      result.action === "failed" || result.action === "timed_out" || result.action === "blocked",
+  );
+
 interface CommandOutputEvent {
   readonly itemName: string;
   readonly stream: "stdout" | "stderr";

@@ -57,6 +57,7 @@ const pressAndSettle = async (press: () => void): Promise<void> => {
 
 test("InteractiveRigApp drives preview execution, renders item progress, and inspects logs", async () => {
   const requests: Parameters<ExecuteInteractiveRun>[0][] = [];
+  const exitCodes: number[] = [];
   const executeRun: ExecuteInteractiveRun = async (request, emit) => {
     requests.push(request);
     emit({ kind: "system", message: "previewing 2 items" });
@@ -104,7 +105,7 @@ test("InteractiveRigApp drives preview execution, renders item progress, and ins
         makeItem("ripgrep", { dependsOn: ["homebrew"] }),
       ]}
       executeRun={executeRun}
-      onExit={() => undefined}
+      onExit={(exitCode) => exitCodes.push(exitCode)}
     />,
     { width: 130, height: 40 },
   );
@@ -180,6 +181,8 @@ test("InteractiveRigApp drives preview execution, renders item progress, and ins
         apply: false,
       },
     ]);
+    await pressAndSettle(() => setup.mockInput.pressKey("q"));
+    expect(exitCodes).toEqual([0]);
   } finally {
     act(() => {
       setup.renderer.destroy();
@@ -188,6 +191,7 @@ test("InteractiveRigApp drives preview execution, renders item progress, and ins
 });
 
 test("InteractiveRigApp renders update completion and visible post-check failures", async () => {
+  const exitCodes: number[] = [];
   const results: readonly ExecutionResult[] = [
     result("current-tool", "update_completed", "installed"),
     {
@@ -199,8 +203,11 @@ test("InteractiveRigApp renders update completion and visible post-check failure
       error: "Blocked by unsuccessful dependency: broken-tool",
     },
   ];
-  const executeRun: ExecuteInteractiveRun = async (_request, emit) => {
-    for (const item of results) {
+  const executeRun: ExecuteInteractiveRun = async (request, emit) => {
+    const runResults = request.dryRun
+      ? results.map((item) => result(item.name, "skipped", "missing"))
+      : results;
+    for (const item of runResults) {
       emit({
         kind: item.action === "failed" ? "error" : "progress",
         itemName: item.name,
@@ -210,7 +217,7 @@ test("InteractiveRigApp renders update completion and visible post-check failure
         resultError: item.error,
       });
     }
-    return { results };
+    return { results: runResults };
   };
   const setup = await testRender(
     <InteractiveRigApp
@@ -222,7 +229,7 @@ test("InteractiveRigApp renders update completion and visible post-check failure
         makeItem("dependent-tool", { dependsOn: ["broken-tool"] }),
       ]}
       executeRun={executeRun}
-      onExit={() => undefined}
+      onExit={(exitCode) => exitCodes.push(exitCode)}
     />,
     { width: 160, height: 46 },
   );
@@ -242,6 +249,8 @@ test("InteractiveRigApp renders update completion and visible post-check failure
         candidate.includes("dependent-tool  blocked"),
     );
 
+    expect(frame).toContain("Run failed");
+    expect(frame).not.toContain("Run complete");
     expect(frame).toContain("2 need inspection");
     expect(frame).toContain("Verification failed for broken-tool");
     expect(frame).not.toContain("current-tool  updated");
@@ -253,6 +262,141 @@ test("InteractiveRigApp renders update completion and visible post-check failure
       candidate.includes("logs / broken-tool"),
     );
     expect(logFrame).toContain("Post-operation check did not pass");
+
+    await pressAndSettle(() => setup.mockInput.pressKey("p"));
+    const previewFrame = await setup.waitForFrame((candidate) =>
+      candidate.includes("Session failed"),
+    );
+    expect(previewFrame).not.toContain("Verification failed");
+    await pressAndSettle(() => setup.mockInput.pressKey("q"));
+    expect(exitCodes).toEqual([1]);
+  } finally {
+    act(() => {
+      setup.renderer.destroy();
+    });
+  }
+});
+
+test.each(["failed", "timed_out", "blocked", "rejected"] satisfies ReadonlyArray<
+  ExecutionResult["action"] | "rejected"
+>)("InteractiveRigApp returns failure on close for %s", async (failure) => {
+  const exitCodes: number[] = [];
+  const reason = `runner outcome: ${failure}`;
+  const executeRun: ExecuteInteractiveRun = async (_request, emit) => {
+    if (failure === "rejected") {
+      throw new Error(reason);
+    }
+    const item = {
+      ...result("broken-tool", failure, failure === "blocked" ? "blocked" : "error"),
+      error: reason,
+    };
+    emit({
+      kind: "error",
+      itemName: item.name,
+      message: formatExecutionResultLog(item),
+      resultAction: item.action,
+      resultStatus: item.status,
+      resultError: item.error,
+    });
+    return { results: [item] };
+  };
+  const setup = await testRender(
+    <InteractiveRigApp
+      options={baseOptions}
+      configSource={{ _tag: "local", path: "./system-config.json" }}
+      items={[makeItem("broken-tool")]}
+      executeRun={executeRun}
+      onExit={(exitCode) => exitCodes.push(exitCode)}
+    />,
+    { width: 130, height: 40 },
+  );
+
+  try {
+    await settle();
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Choose tags"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Review selection"));
+    await pressAndSettle(() => setup.mockInput.pressKey("r"));
+    const frame = await setup.waitForFrame((candidate) => candidate.includes("Run failed"));
+    expect(frame).not.toContain("Run complete");
+    expect(frame).toContain(reason);
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    const logFrame = await setup.waitForFrame((candidate) =>
+      candidate.includes("logs / all selected items"),
+    );
+    expect(logFrame).toContain(reason);
+    await pressAndSettle(() => setup.mockInput.pressKey("q"));
+    expect(exitCodes).toEqual([1]);
+  } finally {
+    act(() => {
+      setup.renderer.destroy();
+    });
+  }
+});
+
+test.each([
+  { resolveOnAbort: false, previousFailure: false, exitCode: 130 },
+  { resolveOnAbort: true, previousFailure: false, exitCode: 130 },
+  { resolveOnAbort: false, previousFailure: true, exitCode: 1 },
+])("InteractiveRigApp does not erase a cancelled run (%j)", async (scenario) => {
+  const exitCodes: number[] = [];
+  let runCount = 0;
+  const executeRun: ExecuteInteractiveRun = async (request, _emit, signal) => {
+    if (request.dryRun) {
+      return { results: [result("test-tool", "skipped", "missing")] };
+    }
+    runCount += 1;
+    if (scenario.previousFailure && runCount === 1) {
+      return { results: [result("test-tool", "failed", "error")] };
+    }
+    return new Promise((resolve, reject) => {
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (scenario.resolveOnAbort) {
+            resolve({ results: [result("test-tool", "installed", "installed")] });
+          } else {
+            reject(new Error("cancelled by user"));
+          }
+        },
+        { once: true },
+      );
+    });
+  };
+  const setup = await testRender(
+    <InteractiveRigApp
+      options={baseOptions}
+      configSource={{ _tag: "local", path: "./system-config.json" }}
+      items={[makeItem("test-tool")]}
+      executeRun={executeRun}
+      onExit={(exitCode) => exitCodes.push(exitCode)}
+    />,
+    { width: 80, height: 40 },
+  );
+
+  try {
+    await settle();
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Choose tags"));
+    await pressAndSettle(() => setup.mockInput.pressEnter());
+    await setup.waitForFrame((frame) => frame.includes("Review selection"));
+    if (scenario.previousFailure) {
+      await pressAndSettle(() => setup.mockInput.pressKey("r"));
+      await setup.waitForFrame((frame) => frame.includes("Run failed"));
+    }
+    await pressAndSettle(() => setup.mockInput.pressKey("r"));
+    await setup.waitForFrame((frame) => frame.includes("Running"));
+    await pressAndSettle(() => setup.mockInput.pressKey("q"));
+    await setup.waitForFrame((frame) => frame.includes("Run cancelled"));
+    expect(exitCodes).toEqual([]);
+    await pressAndSettle(() => setup.mockInput.pressKey("p"));
+    const previewFrame = await setup.waitForFrame((frame) =>
+      frame.includes(scenario.previousFailure ? "Session failed" : "Cancelled"),
+    );
+    expect(previewFrame).not.toContain("Run complete");
+    await pressAndSettle(() => setup.mockInput.pressKey("q"));
+    expect(exitCodes).toEqual([scenario.exitCode]);
   } finally {
     act(() => {
       setup.renderer.destroy();

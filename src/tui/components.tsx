@@ -20,6 +20,7 @@ interface HeaderProps {
 
 interface SelectorPaneProps {
   readonly stageTitle: string;
+  readonly borderColor: string;
   readonly options: SelectOption[];
   readonly selectedIndex: number;
   readonly onChange: (index: number) => void;
@@ -300,7 +301,7 @@ const formatRunItemActivity = (item: TuiRunItemState): string => {
   }
 
   if (item.phase === "blocked") {
-    return item.detail ?? "blocked by dependency state";
+    return item.lastMessage ?? item.detail ?? "blocked by dependency state";
   }
 
   return item.lastMessage ?? item.detail ?? `${item.outputCount} installer events captured`;
@@ -401,6 +402,7 @@ export function AppHeader({ configSource }: HeaderProps) {
 
 export function SelectorPane({
   stageTitle,
+  borderColor,
   options,
   selectedIndex,
   onChange,
@@ -413,7 +415,7 @@ export function SelectorPane({
         width: "36%",
         height: "100%",
         border: true,
-        borderColor: palette.border,
+        borderColor,
         backgroundColor: palette.panel,
         padding: 1,
       }}
@@ -467,7 +469,7 @@ export function DetailsPane({
     ? `${selectedItemName} / ${formatReasonBadge(selectedItemReason)}`
     : "all selected items";
   const showRunBoard = stage === "running" || stage === "done";
-  const showLogInspector = showRunBoard && logsOpen && selectedItemName !== undefined;
+  const showLogInspector = showRunBoard && logsOpen;
 
   return (
     <box
@@ -503,7 +505,7 @@ export function DetailsPane({
       {showLogInspector ? (
         <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
           <box style={{ height: 3, flexDirection: "column" }}>
-            <text fg={palette.amber}>{`logs / ${selectedItemName}`}</text>
+            <text fg={palette.amber}>{`logs / ${selectedItemName ?? "all selected items"}`}</text>
             <text fg={palette.muted}>Press b or escape to return to the install board.</text>
           </box>
           <LogStream logs={logs} />
