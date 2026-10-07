@@ -1,6 +1,6 @@
 {
   "name": "@skastr0/rig-linux-arm64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Prebuilt rig CLI binary for Linux arm64.",
   "license": "MIT",
   "repository": {
