@@ -188,5 +188,5 @@ export const runCli = <E, R>(
 ) => Effect.Effect<void, E | CliValidationError.ValidationError, R | CliApp.CliApp.Environment>) =>
   Command.run(makeCommand(handler, binaryName), {
     name: binaryName,
-    version: "0.1.2",
+    version: "0.1.3",
   });
